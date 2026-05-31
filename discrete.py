@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import abc
-from typing import Optional, Self
+from typing import Optional, Self, Callable
 import numpy as np
 
 
@@ -35,7 +35,7 @@ class DiscreteSystem(abc.ABC):
                   state: Optional[np.ndarray] = None,
                   control: Optional[np.ndarray] = None
                   ) -> LtiSystem:
-        """Returns the lti system based on given states."""
+        """Return the lti system based on given states."""
         ...
 
     @abc.abstractmethod
@@ -109,8 +109,9 @@ class LtiSystem(DiscreteSystem):
     """
     Discrete Linear Time-Invariant System.
 
-    Equation: x[n+1] = A * x[n] + B * u[n]
-    y[n] = C * x[n]
+    Equation:
+        x[n+1] = A @ x[n] + B @ u[n]
+        y[n] = C @ x[n]
     """
 
     def __init__(self,
@@ -155,6 +156,7 @@ class LtiSystem(DiscreteSystem):
                   _state: Optional[np.ndarray] = None,
                   _control: Optional[np.ndarray] = None
                   ) -> Self:
+        """Return the lti system."""
         return self
 
     def get_transition_matrix(self) -> np.ndarray:
@@ -195,3 +197,84 @@ class LtiSystem(DiscreteSystem):
             np.ndarray: the output vector of shape (n_output, ).
         """
         return self._c @ state
+
+
+class NonlinearJacSystem(DiscreteSystem):
+    """
+    Discrete non-linear System.
+
+    Equation:
+        x[n+1] = A(x[n], u[n]) @ x[n] + B(x[n], u[n]) @ u[n]
+        y[n] = C(x[n]) @ x[n]
+    """
+
+    def __init__(
+            self,
+            n_state: int,
+            n_control: int,
+            n_output: int,
+            transition_matrix: Callable[[np.ndarray, np.ndarray],
+                                        np.ndarray],
+            control_matrix: Callable[[np.ndarray, np.ndarray],
+                                     np.ndarray],
+            output_matrix: Callable[[np.ndarray],
+                                    np.ndarray]):
+        self._n_state = n_state
+        self._n_control = n_control
+        self._n_output = n_output
+        self._a = transition_matrix
+        self._b = control_matrix
+        self._c = output_matrix
+
+    @property
+    def n_state(self) -> int:
+        return self._n_state
+
+    @property
+    def n_control(self) -> int:
+        return self._n_control
+
+    @property
+    def n_output(self) -> int:
+        return self._n_output
+
+    def linearize(self,
+                  state: Optional[np.ndarray] = None,
+                  control: Optional[np.ndarray] = None
+                  ) -> LtiSystem:
+        """Returns the lti system based on given states."""
+        if state is None:
+            raise ValueError('state can not be None')
+        if control is None:
+            raise ValueError('control can not be None')
+        return LtiSystem(self._a(state, control),
+                         self._b(state, control),
+                         self._c(state))
+
+    def _get_state_one_step(self,
+                            state: np.ndarray,
+                            control: np.ndarray) -> np.ndarray:
+        """Evaluate the next state vector.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+            control: current control input of shape (ncontrol, ).
+
+        Returns:
+            np.ndarray: the next state vector of shape (n_state, ).
+        """
+        return (self._a(state, control) @ state +
+                self._b(state, control) @ control)
+
+    def _get_output_one_step(self,
+                             state: np.ndarray
+                             ) -> np.ndarray:
+        """Evaluate the output vector for a single step.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+
+        Returns:
+            np.ndarray: the output vector of shape (n_output, ).
+        """
+        return self._c(state) @ state

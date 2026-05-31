@@ -2,57 +2,168 @@
 
 import numpy as np
 
-from discrete import LtiSystem
+from discrete import LtiSystem, NonlinearJacSystem
 from mpc import Mpc
 
 import matplotlib.pyplot as plt
 
 
-A = np.array([0.9, 1., 0., 0.5]).reshape(2, 2)
-B = np.array([0., 1.]).reshape(2, 1)
-C = np.array([1., 0.]).reshape(1, 2)
-s = LtiSystem(A, B, C)
-x0 = np.array([0., 0.])
-horizon = 100
-target_output = np.zeros([horizon, s.n_output]) + 1.
-output_weighting_matrix = np.eye(s.n_output)
-control_weighting_matrix = np.eye(s.n_control)
-controller = Mpc(s, horizon, x0, target_output,
-                 output_weighting_matrix,
-                 control_weighting_matrix)
-predicted_control = controller.solve()
-predicted_state = s.get_state(x0, predicted_control)
-predicted_output = s.get_output(predicted_state)
+def example_1():
+    """Control a stable 2-DOF LTI system."""
+    A = np.array([0.9, 1., 0., 0.5]).reshape(2, 2)
+    B = np.array([0., 1.]).reshape(2, 1)
+    C = np.array([1., 0.]).reshape(1, 2)
+    s = LtiSystem(A, B, C)
+    x0 = np.array([1., 0.])
+    horizon = 50
+    uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
+    uncontrolled_output = s.get_output(uncontrolled_state)
+    target_output = np.zeros([horizon, s.n_output]) + 1.
+    output_weighting_matrix = np.eye(s.n_output)
+    control_weighting_matrix = np.eye(s.n_control)
+    controller = Mpc(s, horizon,
+                     output_weighting_matrix,
+                     control_weighting_matrix)
+    predicted_control = controller.solve(x0, target_output)
+    predicted_state = s.get_state(x0, predicted_control)
+    predicted_output = s.get_output(predicted_state)
 
-u0 = np.zeros([1])
-xi = s.get_state(x0, u0.reshape(1, -1)).reshape(-1)
-y = []
-u = []
-for i in range(horizon):
-    mpci = Mpc(s, horizon, xi, target_output,
-               output_weighting_matrix, control_weighting_matrix)
-    ui = mpci.solve()
-    xi = s.get_state(xi, ui[0:1]).reshape(-1)
-    y.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
-    u.append(ui[0].reshape(-1))
+    ui = np.zeros([1])
+    xi = s.get_state(x0, ui.reshape(1, -1)).reshape(-1)
+    y = []
+    u = []
+    for i in range(horizon):
+        ui = controller.solve(xi, target_output)
+        xi = s.get_state(xi, ui[0:1]).reshape(-1)
+        y.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
+        u.append(ui[0].reshape(-1))
+
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(211)
+    ax.plot(predicted_output, '--', label='predicted @ step 0')
+    ax.plot(y, label='controlled')
+    ax.plot(uncontrolled_output, ':', label='uncontrolled')
+    ax.legend()
+    ax.grid()
+    ax.set_ylabel('output')
+
+    ax2 = fig.add_subplot(212, sharex=ax)
+    ax2.plot(predicted_control, '--', label='predicted @ step 0')
+    ax2.plot(u, label='controlled')
+    ax2.legend()
+    ax2.grid()
+    ax2.set_ylabel('control')
+
+    plt.tight_layout(pad=0.1)
 
 
-fig = plt.figure(figsize=(6, 4))
-ax = fig.add_subplot(211)
-ax.plot(predicted_output, label='predicted @ step 0')
-ax.plot(y, label='actual')
-ax.legend()
-ax.grid()
-ax.set_ylabel('output')
+def example_2():
+    """Stablize 2-DOF LTI system."""
+    A = np.array([1.01, 1., 0., 1.0]).reshape(2, 2)
+    B = np.array([0., 1.]).reshape(2, 1)
+    C = np.array([1., 0.]).reshape(1, 2)
+    s = LtiSystem(A, B, C)
+    x0 = np.array([1., 0.])
+    n_sim = 100
+    horizon = 50
+    uncontrolled_state = s.get_state(x0, np.zeros([n_sim, 1]))
+    uncontrolled_output = s.get_output(uncontrolled_state)
+    target_output = np.zeros([n_sim, s.n_output])
+    output_weighting_matrix = np.eye(s.n_output)
+    control_weighting_matrix = np.eye(s.n_control)
+    controller = Mpc(s, n_sim,
+                     output_weighting_matrix,
+                     control_weighting_matrix)
+    predicted_control = controller.solve(x0, target_output)
+    predicted_state = s.get_state(x0, predicted_control)
+    predicted_output = s.get_output(predicted_state)
 
-ax2 = fig.add_subplot(212, sharex=ax)
-ax2.plot(predicted_control, label='predicted @ step 0')
-ax2.plot(u, label='actual')
-ax2.legend()
-ax2.grid()
-ax2.set_ylabel('control')
+    ui = np.zeros([1])
+    xi = s.get_state(x0, ui.reshape(1, -1)).reshape(-1)
+    y = []
+    u = []
+    for i in range(100):
+        ui = controller.solve(xi, target_output, control_ref=ui)
+        xi = s.get_state(xi, ui[0:1]).reshape(-1)
+        y.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
+        u.append(ui[0].reshape(-1))
+
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(211)
+    ax.plot(predicted_output, label='predicted @ step 0')
+    ax.plot(y, '--', label='controlled')
+    ax.plot(uncontrolled_output, ':', label='uncontrolled')
+    ax.set_ylim(-0.1, 2)
+    ax.legend()
+    ax.grid()
+    ax.set_ylabel('output')
+
+    ax2 = fig.add_subplot(212, sharex=ax)
+    ax2.plot(predicted_control, label='predicted @ step 0')
+    ax2.plot(u, '--', label='controlled')
+    ax2.legend()
+    ax2.grid()
+    ax2.set_ylabel('control')
 
 
-plt.tight_layout(pad=0.1)
+def example_3():
+    """Control a nonlinear system."""
+    def A(x, u): return np.array(
+        [0.9, 1., 0., 0.5 + np.sin(x[1])]).reshape(2, 2)
 
-plt.show()
+    def B(x, u): return np.array([0., np.cos(u[0])]).reshape(2, 1)
+    def C(x): return np.array([1., 0.]).reshape(1, 2)
+    s = NonlinearJacSystem(2, 1, 1, A, B, C)
+    x0 = np.array([1., 0.])
+    horizon = 100
+    uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
+    uncontrolled_output = s.get_output(uncontrolled_state)
+    target_output = np.zeros([horizon, s.n_output]) + 1.
+    output_weighting_matrix = np.eye(s.n_output)
+    control_weighting_matrix = np.eye(s.n_control)
+    controller = Mpc(s, horizon,
+                     output_weighting_matrix,
+                     control_weighting_matrix)
+    predicted_control = controller.solve(
+        x0, target_output, np.stack([x0] * horizon), np.zeros([horizon, 1]))
+    predicted_state = s.get_state(x0, predicted_control)
+    predicted_output = s.get_output(predicted_state)
+
+    ui = np.zeros([horizon, 1])
+    xi = s.get_state(x0, ui)
+    u = []
+    for i in range(horizon):
+        xi0 = xi[0]
+        for j in range(20):
+            ui = controller.solve(xi0, target_output, xi, ui)
+            xi = s.get_state(xi[0], ui)
+        xi = s.get_state(xi0, ui)
+        u.append(ui[0].reshape(-1))
+    u = np.array(u).reshape(-1, 1)
+    x = s.get_state(x0, u)
+    y = s.get_output(x)
+
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(211)
+    ax.plot(predicted_output, '--', label='predicted @ step 0')
+    ax.plot(y, label='controlled')
+    ax.plot(uncontrolled_output, ':', label='uncontrolled')
+    ax.legend()
+    ax.grid()
+    ax.set_ylabel('output')
+
+    ax2 = fig.add_subplot(212, sharex=ax)
+    ax2.plot(predicted_control, '--', label='predicted @ step 0')
+    ax2.plot(u, label='controlled')
+    ax2.legend()
+    ax2.grid()
+    ax2.set_ylabel('control')
+
+    plt.tight_layout(pad=0.1)
+
+
+if __name__ == '__main__':
+    # example_1()
+    # example_2()
+    example_3()
+    plt.show()

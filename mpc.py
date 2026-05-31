@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
 
 from typing import Optional
-
+from dataclasses import dataclass
 import numpy as np
 from scipy.sparse import csc_matrix
 
 import osqp
 
 from discrete import DiscreteSystem, LtiSystem
+
+
+@dataclass
+class _QpInternal:
+    m_x: np.ndarray
+    m_u: np.ndarray
+    c_bar: np.ndarray
+    q_bar: np.ndarray
+    r_bar: np.ndarray
+    c_bar_m_x: np.ndarray
+    c_bar_m_u: np.ndarray
+    p: np.ndarray
+    q: np.ndarray
 
 
 class Mpc:
@@ -31,8 +44,6 @@ class Mpc:
         self,
         system: DiscreteSystem,
         horizon: int,
-        initial_state: np.ndarray,
-        target_output: np.ndarray,
         output_weighting_matrix: np.ndarray,
         control_weighting_matrix: np.ndarray
     ):
@@ -42,19 +53,17 @@ class Mpc:
         Args:
             system: The discrete LTI system object.
             horizon: Prediction horizon (N).
-            initial_state: Initial state.
-            target_output: Reference output sequence.
             output_weighting_matrix: (n_output, n_output)
             control_weighting_matrix: (n_control, n_control).
         """
         self._system = system
         self._horizon = horizon
-        self._initial_state = initial_state
-        self._target_output = target_output
         self._output_weighting_matrix = output_weighting_matrix
         self._control_weighting_matrix = control_weighting_matrix
         self._mpc_dim = self._horizon * self._system.n_control
-        
+
+        self._qp_internal: Optional[_QpInternal] = None
+
     def _assemble_linear_qp_helper(
             self,
             state_ref, control_ref, n_state, n_control, n_output,
@@ -101,6 +110,11 @@ class Mpc:
             state_ref, control_ref, n_state, n_control, n_output,
             m_x, m_u, c_bar, q_bar, r_bar):
         """Assemble the qp intermediate matrixes inplace."""
+        if state_ref is None:
+            state_ref = [None] * self._horizon
+        if control_ref is None:
+            control_ref = [None] * self._horizon
+
         a_last = np.eye(n_state)
         for i in range(self._horizon):
             system = self._system.linearize(state_ref[i], control_ref[i])
@@ -139,8 +153,10 @@ class Mpc:
             a_last = m_x[start_idx_x: stop_idx_x]
 
     def _build_qp(self,
-                  state_ref: list[Optional[np.ndarray]],
-                  control_ref: list[Optional[np.ndarray]]):
+                  initial_state: np.ndarray,
+                  target_output: np.ndarray,
+                  state_ref: Optional[np.ndarray],
+                  control_ref: Optional[np.ndarray]) -> None:
         """
         Build the standart quadratic programming problem.
 
@@ -201,20 +217,37 @@ class Mpc:
         # 3. Calculate P and q based on output error
         c_bar_m_x = c_bar @ m_x
         c_bar_m_u = c_bar @ m_u
-        y_ref_vec = self._target_output.reshape(-1)
-        e_y = (c_bar_m_x @ self._initial_state).reshape(-1) - y_ref_vec
+        y_ref_vec = target_output.reshape(-1)
+        e_y = (c_bar_m_x @ initial_state).reshape(-1) - y_ref_vec
         p = 2 * (c_bar_m_u.T @ q_bar @ c_bar_m_u + r_bar)
         q = 2 * c_bar_m_u.T @ q_bar @ e_y
 
-        return p, q
+        self._qp_internal = _QpInternal(m_x, m_u,
+                                        c_bar, q_bar, r_bar,
+                                        c_bar_m_x, c_bar_m_u,
+                                        p, q)
+
+    def _update_qp(self,
+                   initial_state: np.ndarray,
+                   target_output: np.ndarray) -> None:
+        """Update the qp problem with minimal effort."""
+        if self._qp_internal is None:
+            raise ValueError(
+                '`_update_qp` can only be called after the '
+                'problem is built by `_build_qp`')
+        c_bar_m_x = self._qp_internal.c_bar_m_x
+        c_bar_m_u = self._qp_internal.c_bar_m_u
+        q_bar = self._qp_internal.q_bar
+        y_ref_vec = target_output.reshape(-1)
+        e_y = (c_bar_m_x @ initial_state).reshape(-1) - y_ref_vec
+        q = 2 * c_bar_m_u.T @ q_bar @ e_y
+        self._qp_internal.q = q
 
     def solve(self,
-              state_ref: Optional[
-                  list[Optional[np.ndarray]] |
-                  np.ndarray] = None,
-              control_ref: Optional[
-                  list[Optional[np.ndarray]] |
-                  np.ndarray] = None,
+              initial_state: np.ndarray,
+              target_output: np.ndarray,
+              state_ref: Optional[np.ndarray] = None,
+              control_ref: Optional[np.ndarray] = None,
               max_iter: Optional[int] = None,
               eps_abs: Optional[float] = None,
               eps_rel: Optional[float] = None
@@ -223,17 +256,23 @@ class Mpc:
         Solve the mpc problem.
 
         Args:
+            initial_state: Initial state.
+            target_output: Reference output sequence.
             state_ref: reference state for system linearization.
             control_ref: reference state for system linearization.
         """
-        warm_start = True
-        if state_ref is None:
-            state_ref = [None] * self._horizon
-        if control_ref is None:
-            control_ref = [None] * self._horizon
-            warm_start = False
+        warm_start = False if control_ref is None else True
+        use_cached = self._qp_internal and isinstance(self._system, LtiSystem)
 
-        p, q = self._build_qp(list(state_ref), list(control_ref))
+        if use_cached:
+            self._update_qp(initial_state, target_output)
+        else:
+            self._build_qp(initial_state, target_output,
+                           state_ref, control_ref)
+
+        p = self._qp_internal.p
+        q = self._qp_internal.q
+
         p_sparse = csc_matrix(p)
 
         prob = osqp.OSQP()
