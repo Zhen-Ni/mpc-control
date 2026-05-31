@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-from typing import Optional
+from __future__ import annotations
+from typing import Optional, Self
 from dataclasses import dataclass
 import numpy as np
 from scipy.sparse import csc_matrix
@@ -21,6 +22,23 @@ class _QpInternal:
     c_bar_m_u: np.ndarray
     p: np.ndarray
     q: np.ndarray
+
+
+@dataclass
+class _QpConstraint:
+    modified: bool
+    control_bound: Optional[tuple[np.ndarray, np.ndarray]]
+    output_bound: Optional[tuple[np.ndarray, np.ndarray]]
+    a: np.ndarray
+    lb: np.ndarray
+    ub: np.ndarray
+
+    @staticmethod
+    def new(dim) -> Self:
+        return _QpConstraint(False, None, None,
+                             np.zeros([0, dim]),
+                             np.zeros([0]),
+                             np.zeros([0]))
 
 
 class Mpc:
@@ -63,6 +81,87 @@ class Mpc:
         self._mpc_dim = self._horizon * self._system.n_control
 
         self._qp_internal: Optional[_QpInternal] = None
+        self._qp_constraint = _QpConstraint.new(self._mpc_dim)
+
+        self._result = None
+
+    @property
+    def result(self):
+        """Return the lastest verbose result."""
+        return self._result
+
+    def set_input_limit(self,
+                        lb: np.ndarray,
+                        ub: np.ndarray) -> None:
+        """Set the input limit of control vectors.
+
+        Args:
+            lb: The lower bound with shape (horizon, n_control).
+            lb: The upper bound with shape (horizon, n_control).
+        """
+        dim = (self._horizon, self._system.n_control)
+        if not lb.shape == dim:
+            raise ValueError(f'shape of lb should be {dim}, '
+                             f'got {lb.shape}')
+        if not ub.shape == dim:
+            raise ValueError(f'shape of ub should be {dim}, '
+                             f'got {ub.shape}')
+        self._qp_constraint.modified = True
+        self._qp_constraint.control_bound = lb, ub
+
+    def set_output_limit(self,
+                         lb: np.ndarray,
+                         ub: np.ndarray) -> None:
+        """Set the limit of output values.
+
+        Args:
+            lb: The lower bound with shape (horizon, n_output).
+            lb: The upper bound with shape (horizon, n_output).
+        """
+        dim = (self._horizon, self._system.n_output)
+        if not lb.shape == dim:
+            raise ValueError(f'shape of lb should be {dim}, '
+                             f'got {lb.shape}')
+        if not ub.shape == dim:
+            raise ValueError(f'shape of ub should be {dim}, '
+                             f'got {ub.shape}')
+        self._qp_constraint.modified = True
+        self._qp_constraint.output_bound = lb, ub
+
+    def _build_constraints(self, initial_state: np.ndarray) -> None:
+        """Build the constraints in self._qp_internal.
+
+        Make sure self._qp_internal is correctly initialized before
+        calling this.
+
+        """
+        if self._qp_internal is None:
+            raise ValueError('self._qp_internal should be built first')
+        a_list = []
+        lb_list = []
+        ub_list = []
+        if self._qp_constraint.control_bound:
+            a_list.append(np.eye(self._mpc_dim))
+            lb_list.append(self._qp_constraint.control_bound[0].reshape(-1))
+            ub_list.append(self._qp_constraint.control_bound[1].reshape(-1))
+
+        if self._qp_constraint.output_bound:
+            a = self._qp_internal.c_bar_m_u
+            offset = self._qp_internal.c_bar_m_x @ initial_state
+            lb = self._qp_constraint.output_bound[0].reshape(-1) - offset
+            ub = self._qp_constraint.output_bound[1].reshape(-1) - offset
+            a_list.append(a)
+            lb_list.append(lb)
+            ub_list.append(ub)
+        if a_list:
+            self._qp_constraint.a = np.concat(a_list)
+            self._qp_constraint.lb = np.concat(lb_list)
+            self._qp_constraint.ub = np.concat(ub_list)
+        else:
+            self._qp_constraint.a = np.zeros([0, self._mpc_dim])
+            self._qp_constraint.lb = np.zeros([0])
+            self._qp_constraint.ub = np.zeros([0])
+        self._qp_constraint.modified = False
 
     def _assemble_linear_qp_helper(
             self,
@@ -227,10 +326,17 @@ class Mpc:
                                         c_bar_m_x, c_bar_m_u,
                                         p, q)
 
+
     def _update_qp(self,
                    initial_state: np.ndarray,
                    target_output: np.ndarray) -> None:
-        """Update the qp problem with minimal effort."""
+        """Update the qp problem with minimal effort.
+
+        This method should only be used when initial state or target
+        output is changed. Do not rely on this method if the system
+        matrixes are changed.
+
+        """
         if self._qp_internal is None:
             raise ValueError(
                 '`_update_qp` can only be called after the '
@@ -243,6 +349,7 @@ class Mpc:
         q = 2 * c_bar_m_u.T @ q_bar @ e_y
         self._qp_internal.q = q
 
+
     def solve(self,
               initial_state: np.ndarray,
               target_output: np.ndarray,
@@ -251,7 +358,7 @@ class Mpc:
               max_iter: Optional[int] = None,
               eps_abs: Optional[float] = None,
               eps_rel: Optional[float] = None
-              ):
+              ) -> Optional[np.ndarray]:
         """
         Solve the mpc problem.
 
@@ -270,15 +377,17 @@ class Mpc:
             self._build_qp(initial_state, target_output,
                            state_ref, control_ref)
 
+        self._build_constraints(initial_state)
+
         p = self._qp_internal.p
         q = self._qp_internal.q
 
         p_sparse = csc_matrix(p)
 
         prob = osqp.OSQP()
-        a = csc_matrix((0, q.shape[0]))
-        lb = []
-        ub = []
+        a = csc_matrix(self._qp_constraint.a)
+        lb = self._qp_constraint.lb
+        ub = self._qp_constraint.ub
         kwargs = dict(max_iter=max_iter,
                       eps_abs=eps_abs,
                       eps_rel=eps_rel)
@@ -288,5 +397,8 @@ class Mpc:
         if warm_start:
             prob.warm_start(np.asarray(control_ref).reshape(-1))
         res = prob.solve()
-        u = res.x.reshape(self._horizon, self._system.n_control)
-        return u
+        self._result = res
+        if res.info.status == 'solved':
+            u = res.x.reshape(self._horizon, self._system.n_control)
+            return u
+        return None

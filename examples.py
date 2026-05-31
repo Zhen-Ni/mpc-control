@@ -59,19 +59,19 @@ def example_1():
 
 def example_2():
     """Stablize 2-DOF LTI system."""
-    A = np.array([1.01, 1., 0., 1.0]).reshape(2, 2)
+    A = np.array([1.01, 1., 0., 0.9]).reshape(2, 2)
     B = np.array([0., 1.]).reshape(2, 1)
     C = np.array([1., 0.]).reshape(1, 2)
     s = LtiSystem(A, B, C)
     x0 = np.array([1., 0.])
     n_sim = 100
     horizon = 50
-    uncontrolled_state = s.get_state(x0, np.zeros([n_sim, 1]))
+    uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
     uncontrolled_output = s.get_output(uncontrolled_state)
-    target_output = np.zeros([n_sim, s.n_output])
+    target_output = np.zeros([horizon, s.n_output])
     output_weighting_matrix = np.eye(s.n_output)
     control_weighting_matrix = np.eye(s.n_control)
-    controller = Mpc(s, n_sim,
+    controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix)
     predicted_control = controller.solve(x0, target_output)
@@ -82,7 +82,7 @@ def example_2():
     xi = s.get_state(x0, ui.reshape(1, -1)).reshape(-1)
     y = []
     u = []
-    for i in range(100):
+    for i in range(n_sim):
         ui = controller.solve(xi, target_output, control_ref=ui)
         xi = s.get_state(xi, ui[0:1]).reshape(-1)
         y.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
@@ -162,8 +162,123 @@ def example_3():
     plt.tight_layout(pad=0.1)
 
 
+def example_4():
+    """Control a stable 2-DOF LTI system with constrainted control input."""
+    A = np.array([0.9, 1., 0., 0.5]).reshape(2, 2)
+    B = np.array([0., 1.]).reshape(2, 1)
+    C = np.array([1., 0.]).reshape(1, 2)
+    s = LtiSystem(A, B, C)
+    x0 = np.array([1., 0.])
+    horizon = 50
+    target_output = np.zeros([horizon, s.n_output]) + 1.
+    output_weighting_matrix = np.eye(s.n_output)
+    control_weighting_matrix = np.eye(s.n_control)
+    controller = Mpc(s, horizon,
+                     output_weighting_matrix,
+                     control_weighting_matrix)
+     
+    ui = np.zeros([1])
+    xi = s.get_state(x0, ui.reshape(1, -1)).reshape(-1)
+    y_free = []
+    u_free = []
+    for i in range(horizon):
+        ui = controller.solve(xi, target_output)
+        xi = s.get_state(xi, ui[0:1]).reshape(-1)
+        y_free.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
+        u_free.append(ui[0].reshape(-1))
+
+    controller.set_input_limit(-0.1 * np.ones([horizon, 1]),
+                               0.1 * np.ones([horizon, 1]))
+    ui = np.zeros([1])
+    xi = s.get_state(x0, ui.reshape(1, -1)).reshape(-1)
+    y_cons = []
+    u_cons = []
+    for i in range(horizon):
+        ui = controller.solve(xi, target_output)
+        xi = s.get_state(xi, ui[0:1]).reshape(-1)
+        y_cons.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
+        u_cons.append(ui[0].reshape(-1))
+
+        
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(211)
+    ax.plot(y_free, label='free')
+    ax.plot(y_cons, label='constraint')
+    ax.legend()
+    ax.grid()
+    ax.set_ylabel('output')
+
+    ax2 = fig.add_subplot(212, sharex=ax)
+    ax2.plot(u_free, label='free')
+    ax2.plot(u_cons, label='constraint')
+    ax2.legend()
+    ax2.grid()
+    ax2.set_ylabel('control')
+
+    plt.tight_layout(pad=0.1)
+
+
+
+
+def example_5():
+    """Control a stable 2-DOF LTI system with constrainted control output."""
+    A = np.array([0.9, 1., 0., 0.5]).reshape(2, 2)
+    B = np.array([0., 1.]).reshape(2, 1)
+    C = np.array([1., 0.]).reshape(1, 2)
+    s = LtiSystem(A, B, C)
+    x0 = np.array([1., 0.])
+    horizon = 50
+    target_output = np.zeros([horizon, s.n_output]) + 1.
+    output_weighting_matrix = np.eye(s.n_output)
+    control_weighting_matrix = np.eye(s.n_control)
+    controller = Mpc(s, horizon,
+                     output_weighting_matrix,
+                     control_weighting_matrix)
+     
+    ui = np.zeros([1])
+    xi = s.get_state(x0, ui.reshape(1, -1)).reshape(-1)
+    y_free = []
+    u_free = []
+    for i in range(horizon):
+        ui = controller.solve(xi, target_output)
+        xi = s.get_state(xi, ui[0:1]).reshape(-1)
+        y_free.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
+        u_free.append(ui[0].reshape(-1))
+
+    controller.set_output_limit(0.0 * np.ones([horizon, 1]),
+                                0.9 * np.ones([horizon, 1]))
+    ui = np.zeros([1])
+    xi = s.get_state(x0, ui.reshape(1, -1)).reshape(-1)
+    y_cons = []
+    u_cons = []
+    for i in range(horizon):
+        ui = controller.solve(xi, target_output)
+        xi = s.get_state(xi, ui[0:1]).reshape(-1)
+        y_cons.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
+        u_cons.append(ui[0].reshape(-1))
+
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(211)
+    ax.plot(y_free, label='free')
+    ax.plot(y_cons, label='constraint')
+    ax.legend()
+    ax.grid()
+    ax.set_ylabel('output')
+
+    ax2 = fig.add_subplot(212, sharex=ax)
+    ax2.plot(u_free, label='free')
+    ax2.plot(u_cons, label='constraint')
+    ax2.legend()
+    ax2.grid()
+    ax2.set_ylabel('control')
+
+    plt.tight_layout(pad=0.1)
+
+    
 if __name__ == '__main__':
     # example_1()
     # example_2()
-    example_3()
+    # example_3()
+    example_4()
+    example_5()
     plt.show()
