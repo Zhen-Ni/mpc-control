@@ -2,8 +2,7 @@
 
 import numpy as np
 
-from discrete import LtiSystem, NonlinearJacSystem
-from mpc import Mpc
+from mpc import Mpc, LtiSystem, LinearJacSystem
 
 import matplotlib.pyplot as plt
 
@@ -22,11 +21,9 @@ def example_1():
     target_output = np.zeros([horizon, s.n_output]) + 1.
     output_weighting_matrix = np.eye(s.n_output)
     control_weighting_matrix = np.eye(s.n_control)
-    control_delta_weighting_matrix = np.eye(s.n_control) * 0
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
-                     control_weighting_matrix,
-                     control_delta_weighting_matrix)
+                     control_weighting_matrix)
     predicted_control = controller.solve(target_output, x0, u0)
     predicted_state = s.get_state(x0, predicted_control)
     predicted_output = s.get_output(predicted_state)
@@ -120,7 +117,7 @@ def example_3():
 
     def B(x, u): return np.array([0., np.cos(u[0])]).reshape(2, 1)
     def C(x): return np.array([1., 0.]).reshape(1, 2)
-    s = NonlinearJacSystem(2, 1, 1, A, B, C)
+    s = LinearJacSystem(2, 1, 1, A, B, C)
     x0 = np.array([1., 0.])
     u0 = np.zeros([1])
     horizon = 100

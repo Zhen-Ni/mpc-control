@@ -199,9 +199,9 @@ class LtiSystem(DiscreteSystem):
         return self._c @ state
 
 
-class NonlinearJacSystem(DiscreteSystem):
+class LinearJacSystem(DiscreteSystem):
     """
-    Discrete non-linear System.
+    Discrete non-linear System with linear Jacobian.
 
     Equation:
         x[n+1] = A(x[n], u[n]) @ x[n] + B(x[n], u[n]) @ u[n]

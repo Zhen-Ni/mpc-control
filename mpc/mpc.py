@@ -8,14 +8,14 @@ from scipy.sparse import csc_matrix
 
 import osqp
 
-from discrete import DiscreteSystem, LtiSystem
+from .discrete import DiscreteSystem, LtiSystem
 
 
 def _build_delta_matrix(qp_dim, n_control) -> np.ndarray:
     """
     Build the matrix to transfer control input to delta input.
 
-    return D_bar s.t. ΔU = D_bar * U
+    Return D_bar s.t. ΔU = D_bar * U
     """
     d = np.eye(qp_dim)
     dif = np.diag(np.ones(qp_dim-n_control), k=-n_control)
