@@ -171,7 +171,7 @@ def example_3():
 
 
 def example_4():
-    """Control a stable 2-DOF LTI system with constrainted control input."""
+    """Control a stable 2-DOF LTI system with constrained control input."""
     A = np.array([0.9, 1., 0., 0.5]).reshape(2, 2)
     B = np.array([0., 1.]).reshape(2, 1)
     C = np.array([1., 0.]).reshape(1, 2)

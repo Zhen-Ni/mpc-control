@@ -447,15 +447,32 @@ class Mpc:
               eps_abs: Optional[float] = None,
               eps_rel: Optional[float] = None
               ) -> Optional[np.ndarray]:
-        """
-        Solve the mpc problem.
+        """Solve the mpc problem.
 
         Args:
-            initial_state: Initial state.
-            initial_control: The control input in the previous timestep.
-            target_output: Reference output sequence.
-            state_ref: reference state for system linearization.
-            control_ref: reference state for system linearization.
+            initial_state: Initial state (x_0).
+            initial_control: The control input in the previous
+            timestep (u_{-1}).
+            target_output: Reference output sequence Y_ref. Note that
+                this corresponds to the outputs from step 1 to step N
+                (y_1 to y_N), as the output at the current step 0
+                (y_0) cannot be influenced by future controls.
+            state_ref: Reference state for system linearization. This
+                corresponds to the states from step 0 to step N-1 (x_0
+                to x_{N-1}).
+            control_ref: Reference control for system
+                linearization. This corresponds to the controls from
+                step 0 to step N-1 (u_0 to u_{N-1}).
+            max_iter: Maximum iterations for OSQP solver.
+            eps_abs: Absolute convergence tolerance for OSQP solver.
+            eps_rel: Relative convergence tolerance for OSQP solver.
+
+        Returns:
+            The optimal control sequence U with shape (horizon,
+            n_control), corresponding to the controls from step 0 to
+            step N-1 (u_0 to u_{N-1}), or None if the problem is not
+            solved successfully.
+
         """
         warm_start = False if control_ref is None else True
         use_cached = self._qp_internal and isinstance(self._system, LtiSystem)
@@ -494,10 +511,11 @@ class Mpc:
                       eps_rel=eps_rel)
         kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
         prob.setup(p_sparse, q, a, lb, ub,
-                   warm_start=warm_start, verbose=False, **kwargs)
+                   warm_starting=warm_start, verbose=False,
+                   **kwargs)
         if warm_start:
-            prob.warm_start(np.asarray(control_ref).reshape(-1))
-        res = prob.solve()
+            res = prob.warm_start(np.asarray(control_ref).reshape(-1))
+        res = prob.solve(raise_error=False)
         self._result = res
         if res.info.status == 'solved':
             u = res.x.reshape(self._horizon, self._system.n_control)
