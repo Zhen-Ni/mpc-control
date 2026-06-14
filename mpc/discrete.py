@@ -31,17 +31,17 @@ class DiscreteSystem(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def linearize_transition(self,
-                             state: Optional[np.ndarray] = None,
-                             control: Optional[np.ndarray] = None
-                             ) -> tuple[np.ndarray, np.ndarray]:
+    def _linearize_transition(self,
+                              state: Optional[np.ndarray] = None,
+                              control: Optional[np.ndarray] = None
+                              ) -> tuple[np.ndarray, np.ndarray]:
         """Linearize the state transition function."""
         ...
 
     @abc.abstractmethod
-    def linearize_output(self,
-                         state: Optional[np.ndarray] = None,
-                         ) -> np.ndarray:
+    def _linearize_output(self,
+                          state: Optional[np.ndarray] = None,
+                          ) -> np.ndarray:
         """Linearize the output function."""
         ...
 
@@ -51,8 +51,8 @@ class DiscreteSystem(abc.ABC):
                   ) -> LtiSystem:
         """Return the lti system based on given states."""
         transition_matrix, control_matrix = \
-            self.linearize_transition(state, control)
-        output_matrix = self.linearize_output(state)
+            self._linearize_transition(state, control)
+        output_matrix = self._linearize_output(state)
         return LtiSystem(transition_matrix,
                          control_matrix,
                          output_matrix)
@@ -69,7 +69,7 @@ class DiscreteSystem(abc.ABC):
         Returns:
             np.ndarray: the state sequence of shape (n_state,).
         """
-        a, b = self.linearize_transition(state, control)
+        a, b = self._linearize_transition(state, control)
         return a @ state + b @ control
 
     def get_state(self,
@@ -105,7 +105,7 @@ class DiscreteSystem(abc.ABC):
         Returns:
             np.ndarray: the output vector of shape (n_output, ).
         """
-        c = self.linearize_output(state)
+        c = self._linearize_output(state)
         return c @ state
 
     def get_output(self,
@@ -174,17 +174,17 @@ class LtiSystem(DiscreteSystem):
     def n_output(self) -> int:
         return self._n_output
 
-    def linearize_transition(self,
-                             _state: Optional[np.ndarray] = None,
-                             _control: Optional[np.ndarray] = None
-                             ) -> tuple[np.ndarray, np.ndarray]:
+    def _linearize_transition(self,
+                              _state: Optional[np.ndarray] = None,
+                              _control: Optional[np.ndarray] = None
+                              ) -> tuple[np.ndarray, np.ndarray]:
         """Linearize the state transition function."""
         return (self.get_transition_matrix(),
                 self.get_control_matrix())
 
-    def linearize_output(self,
-                         _state: Optional[np.ndarray] = None,
-                         ) -> np.ndarray:
+    def _linearize_output(self,
+                          _state: Optional[np.ndarray] = None,
+                          ) -> np.ndarray:
         """Linearize the output function."""
         return self.get_output_matrix()
 
@@ -240,10 +240,10 @@ class LinearJacSystem(DiscreteSystem):
     def n_output(self) -> int:
         return self._n_output
 
-    def linearize_transition(self,
-                             state: Optional[np.ndarray] = None,
-                             control: Optional[np.ndarray] = None
-                             ) -> tuple[np.ndarray, np.ndarray]:
+    def _linearize_transition(self,
+                              state: Optional[np.ndarray] = None,
+                              control: Optional[np.ndarray] = None
+                              ) -> tuple[np.ndarray, np.ndarray]:
         """Linearize the state transition function."""
         if state is None:
             raise ValueError('state can not be None')
@@ -251,9 +251,9 @@ class LinearJacSystem(DiscreteSystem):
             raise ValueError('control can not be None')
         return self._a(state, control), self._b(state, control)
 
-    def linearize_output(self,
-                         state: Optional[np.ndarray] = None,
-                         ) -> np.ndarray:
+    def _linearize_output(self,
+                          state: Optional[np.ndarray] = None,
+                          ) -> np.ndarray:
         """Linearize the output function."""
         if state is None:
             raise ValueError('state can not be None')
