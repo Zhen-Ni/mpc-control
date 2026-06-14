@@ -31,14 +31,32 @@ class DiscreteSystem(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def linearize_transition(self,
+                             state: Optional[np.ndarray] = None,
+                             control: Optional[np.ndarray] = None
+                             ) -> tuple[np.ndarray, np.ndarray]:
+        """Linearize the state transition function."""
+        ...
+
+    @abc.abstractmethod
+    def linearize_output(self,
+                         state: Optional[np.ndarray] = None,
+                         ) -> np.ndarray:
+        """Linearize the output function."""
+        ...
+
     def linearize(self,
                   state: Optional[np.ndarray] = None,
                   control: Optional[np.ndarray] = None
                   ) -> LtiSystem:
         """Return the lti system based on given states."""
-        ...
+        transition_matrix, control_matrix = \
+            self.linearize_transition(state, control)
+        output_matrix = self.linearize_output(state)
+        return LtiSystem(transition_matrix,
+                         control_matrix,
+                         output_matrix)
 
-    @abc.abstractmethod
     def _get_state_one_step(self,
                             state: np.ndarray,
                             control: np.ndarray) -> np.ndarray:
@@ -47,8 +65,12 @@ class DiscreteSystem(abc.ABC):
         Args:
             state: current state vector of shape (n_state, ).
             control: current control input of shape (ncontrol, ).
+
+        Returns:
+            np.ndarray: the state sequence of shape (n_state,).
         """
-        ...
+        a, b = self.linearize_transition(state, control)
+        return a @ state + b @ control
 
     def get_state(self,
                   initial_state: np.ndarray,
@@ -72,7 +94,6 @@ class DiscreteSystem(abc.ABC):
             state = next_state
         return xs
 
-    @abc.abstractmethod
     def _get_output_one_step(self,
                              state: np.ndarray
                              ) -> np.ndarray:
@@ -84,7 +105,8 @@ class DiscreteSystem(abc.ABC):
         Returns:
             np.ndarray: the output vector of shape (n_output, ).
         """
-        ...
+        c = self.linearize_output(state)
+        return c @ state
 
     def get_output(self,
                    states: np.ndarray
@@ -92,7 +114,7 @@ class DiscreteSystem(abc.ABC):
         """Evaluate the outputs based on given states.
 
         Args:
-            states: the state sequence of shape (nsteps, n_state), 
+            states: the state sequence of shape (nsteps, n_state),
                     typically obtained from get_state().
 
         Returns:
@@ -152,12 +174,19 @@ class LtiSystem(DiscreteSystem):
     def n_output(self) -> int:
         return self._n_output
 
-    def linearize(self,
-                  _state: Optional[np.ndarray] = None,
-                  _control: Optional[np.ndarray] = None
-                  ) -> Self:
-        """Return the lti system."""
-        return self
+    def linearize_transition(self,
+                             _state: Optional[np.ndarray] = None,
+                             _control: Optional[np.ndarray] = None
+                             ) -> tuple[np.ndarray, np.ndarray]:
+        """Linearize the state transition function."""
+        return (self.get_transition_matrix(),
+                self.get_control_matrix())
+
+    def linearize_output(self,
+                         _state: Optional[np.ndarray] = None,
+                         ) -> np.ndarray:
+        """Linearize the output function."""
+        return self.get_output_matrix()
 
     def get_transition_matrix(self) -> np.ndarray:
         """Returns the state transition matrix A."""
@@ -170,33 +199,6 @@ class LtiSystem(DiscreteSystem):
     def get_output_matrix(self) -> np.ndarray:
         """Returns the output matrix C."""
         return self._c
-
-    def _get_state_one_step(self,
-                            state: np.ndarray,
-                            control: np.ndarray) -> np.ndarray:
-        """Evaluate the next state vector.
-
-        Args:
-            state: current state vector of shape (n_state, ).
-            control: current control input of shape (ncontrol, ).
-
-        Returns:
-            np.ndarray: the next state vector of shape (n_state, ).
-        """
-        return self._a @ state + self._b @ control
-
-    def _get_output_one_step(self,
-                             state: np.ndarray
-                             ) -> np.ndarray:
-        """Evaluate the output vector for a single step.
-
-        Args:
-            state: current state vector of shape (n_state, ).
-
-        Returns:
-            np.ndarray: the output vector of shape (n_output, ).
-        """
-        return self._c @ state
 
 
 class LinearJacSystem(DiscreteSystem):
@@ -238,43 +240,21 @@ class LinearJacSystem(DiscreteSystem):
     def n_output(self) -> int:
         return self._n_output
 
-    def linearize(self,
-                  state: Optional[np.ndarray] = None,
-                  control: Optional[np.ndarray] = None
-                  ) -> LtiSystem:
-        """Returns the lti system based on given states."""
+    def linearize_transition(self,
+                             state: Optional[np.ndarray] = None,
+                             control: Optional[np.ndarray] = None
+                             ) -> tuple[np.ndarray, np.ndarray]:
+        """Linearize the state transition function."""
         if state is None:
             raise ValueError('state can not be None')
         if control is None:
             raise ValueError('control can not be None')
-        return LtiSystem(self._a(state, control),
-                         self._b(state, control),
-                         self._c(state))
+        return self._a(state, control), self._b(state, control)
 
-    def _get_state_one_step(self,
-                            state: np.ndarray,
-                            control: np.ndarray) -> np.ndarray:
-        """Evaluate the next state vector.
-
-        Args:
-            state: current state vector of shape (n_state, ).
-            control: current control input of shape (ncontrol, ).
-
-        Returns:
-            np.ndarray: the next state vector of shape (n_state, ).
-        """
-        return (self._a(state, control) @ state +
-                self._b(state, control) @ control)
-
-    def _get_output_one_step(self,
-                             state: np.ndarray
-                             ) -> np.ndarray:
-        """Evaluate the output vector for a single step.
-
-        Args:
-            state: current state vector of shape (n_state, ).
-
-        Returns:
-            np.ndarray: the output vector of shape (n_output, ).
-        """
-        return self._c(state) @ state
+    def linearize_output(self,
+                         state: Optional[np.ndarray] = None,
+                         ) -> np.ndarray:
+        """Linearize the output function."""
+        if state is None:
+            raise ValueError('state can not be None')
+        return self._c(state)
