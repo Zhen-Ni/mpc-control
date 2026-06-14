@@ -1,10 +1,27 @@
 #!/usr/bin/env python3
 
+"""Discrete-time system models for Model Predictive Control.
+
+This module provides abstract base classes and concrete
+implementations for discrete-time systems. These systems define the
+state transition, control input, and output relationships used by the
+MPC controller.
+
+Classes:
+    DiscreteSystem: Abstract base class for discrete-time systems.
+    LtiSystem: Discrete Linear Time-Invariant System.
+    LinearJacSystem: Discrete non-linear System with linear Jacobian.
+
+"""
+
 from __future__ import annotations
 
 import abc
-from typing import Optional, Self, Callable
+from typing import Optional, Callable
 import numpy as np
+
+
+__all__ = ('DiscreteSystem', 'LtiSystem', 'LinearJacSystem')
 
 
 class DiscreteSystem(abc.ABC):
@@ -35,21 +52,45 @@ class DiscreteSystem(abc.ABC):
                               state: Optional[np.ndarray] = None,
                               control: Optional[np.ndarray] = None
                               ) -> tuple[np.ndarray, np.ndarray]:
-        """Linearize the state transition function."""
+        """Linearize the state transition function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+            control: current control input of shape (n_control, ).
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: the transition matrix A and
+                control matrix B.
+        """
         ...
 
     @abc.abstractmethod
     def _linearize_output(self,
                           state: Optional[np.ndarray] = None,
                           ) -> np.ndarray:
-        """Linearize the output function."""
+        """Linearize the output function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+
+        Returns:
+            np.ndarray: the output matrix C.
+        """
         ...
 
     def linearize(self,
                   state: Optional[np.ndarray] = None,
                   control: Optional[np.ndarray] = None
                   ) -> LtiSystem:
-        """Return the lti system based on given states."""
+        """Return the lti system based on given states.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+            control: current control input of shape (n_control, ).
+
+        Returns:
+            LtiSystem: the linearized system.
+        """
         transition_matrix, control_matrix = \
             self._linearize_transition(state, control)
         output_matrix = self._linearize_output(state)
@@ -141,6 +182,16 @@ class LtiSystem(DiscreteSystem):
                  control_matrix: np.ndarray,
                  output_matrix: np.ndarray
                  ):
+        """Initialize the LTI system.
+
+        Args:
+            transition_matrix: the state transition matrix A of shape
+                (n_state, n_state).
+            control_matrix: the control matrix B of shape
+                (n_state, n_control).
+            output_matrix: the output matrix C of shape
+                (n_output, n_state).
+        """
         self._a = transition_matrix
         self._b = control_matrix
         self._c = output_matrix
@@ -164,40 +215,59 @@ class LtiSystem(DiscreteSystem):
 
     @property
     def n_state(self) -> int:
+        """Dimension of state vector."""
         return self._n_state
 
     @property
     def n_control(self) -> int:
+        """Dimension of control vector."""
         return self._n_control
 
     @property
     def n_output(self) -> int:
+        """Dimension of output vector."""
         return self._n_output
 
     def _linearize_transition(self,
                               _state: Optional[np.ndarray] = None,
                               _control: Optional[np.ndarray] = None
                               ) -> tuple[np.ndarray, np.ndarray]:
-        """Linearize the state transition function."""
+        """Linearize the state transition function.
+
+        Args:
+            _state: current state vector (unused in LTI).
+            _control: current control input (unused in LTI).
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: the transition matrix A and
+                control matrix B.
+        """
         return (self.get_transition_matrix(),
                 self.get_control_matrix())
 
     def _linearize_output(self,
                           _state: Optional[np.ndarray] = None,
                           ) -> np.ndarray:
-        """Linearize the output function."""
+        """Linearize the output function.
+
+        Args:
+            _state: current state vector (unused in LTI).
+
+        Returns:
+            np.ndarray: the output matrix C.
+        """
         return self.get_output_matrix()
 
     def get_transition_matrix(self) -> np.ndarray:
-        """Returns the state transition matrix A."""
+        """Return the state transition matrix A."""
         return self._a
 
     def get_control_matrix(self) -> np.ndarray:
-        """Returns the control matrix B."""
+        """Return the control matrix B."""
         return self._b
 
     def get_output_matrix(self) -> np.ndarray:
-        """Returns the output matrix C."""
+        """Return the output matrix C."""
         return self._c
 
 
@@ -221,6 +291,22 @@ class LinearJacSystem(DiscreteSystem):
                                      np.ndarray],
             output_matrix: Callable[[np.ndarray],
                                     np.ndarray]):
+        """Initialize the discrete non-linear system with linear Jacobian.
+
+        Args:
+            n_state: dimension of the state vector.
+            n_control: dimension of the control vector.
+            n_output: dimension of the output vector.
+            transition_matrix: callable that returns the state transition
+                matrix A. Signature: A(state, control) -> np.ndarray of
+                shape (n_state, n_state).
+            control_matrix: callable that returns the control matrix B.
+                Signature: B(state, control) -> np.ndarray of shape
+                (n_state, n_control).
+            output_matrix: callable that returns the output matrix C.
+                Signature: C(state) -> np.ndarray of shape
+                (n_output, n_state).
+        """
         self._n_state = n_state
         self._n_control = n_control
         self._n_output = n_output
@@ -230,21 +316,33 @@ class LinearJacSystem(DiscreteSystem):
 
     @property
     def n_state(self) -> int:
+        """Dimension of state vector."""
         return self._n_state
 
     @property
     def n_control(self) -> int:
+        """Dimension of control vector."""
         return self._n_control
 
     @property
     def n_output(self) -> int:
+        """Dimension of output vector."""
         return self._n_output
 
     def _linearize_transition(self,
                               state: Optional[np.ndarray] = None,
                               control: Optional[np.ndarray] = None
                               ) -> tuple[np.ndarray, np.ndarray]:
-        """Linearize the state transition function."""
+        """Linearize the state transition function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+            control: current control input of shape (n_control, ).
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: the transition matrix A and
+                control matrix B.
+        """
         if state is None:
             raise ValueError('state can not be None')
         if control is None:
@@ -254,7 +352,14 @@ class LinearJacSystem(DiscreteSystem):
     def _linearize_output(self,
                           state: Optional[np.ndarray] = None,
                           ) -> np.ndarray:
-        """Linearize the output function."""
+        """Linearize the output function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+
+        Returns:
+            np.ndarray: the output matrix C.
+        """
         if state is None:
             raise ValueError('state can not be None')
         return self._c(state)
