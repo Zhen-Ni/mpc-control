@@ -8,9 +8,9 @@ state transition, control input, and output relationships used by the
 MPC controller.
 
 Classes:
-    DiscreteSystem: Abstract base class for discrete-time systems.
-    LtiSystem: Discrete Linear Time-Invariant System.
-    LinearJacSystem: Discrete non-linear System with linear Jacobian.
+    DiscreteSystem: abstract base class for discrete-time systems.
+    LtiSystem: discrete linear time-invariant system.
+    NonlinearSystem: generalized discrete non-linear system.
 
 """
 
@@ -21,15 +21,15 @@ from typing import Optional, Callable
 import numpy as np
 
 
-__all__ = ('DiscreteSystem', 'LtiSystem', 'LinearJacSystem')
+__all__ = ('DiscreteSystem', 'LtiSystem', 'NonlinearSystem')
 
 
 class DiscreteSystem(abc.ABC):
     """Abstract base class for discrete-time systems.
 
     The system can be written as:
-    x[n+1] = f(x[n], u[n])
-    y[n] = g(x[n])
+        x[n+1] = A(x[n], u[n]) @ x[n] + B(x[n], u[n]) @ u[n]
+        y[n] = C(x[n]) @ x[n]
     """
 
     @abc.abstractproperty
@@ -271,9 +271,9 @@ class LtiSystem(DiscreteSystem):
         return self._c
 
 
-class LinearJacSystem(DiscreteSystem):
+class NonlinearSystem(DiscreteSystem):
     """
-    Discrete non-linear System with linear Jacobian.
+    Discrete non-linear System.
 
     Equation:
         x[n+1] = A(x[n], u[n]) @ x[n] + B(x[n], u[n]) @ u[n]
