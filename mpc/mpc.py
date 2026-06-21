@@ -406,14 +406,14 @@ class Mpc:
         control_bar[:self._system.n_control] = initial_control
         q = c_bar_m_u.T @ q_bar @ e_y
 
-        if self._control_weighting:
+        if self._control_weighting is not None:
             r_bar = np.kron(np.eye(self._horizon),
                             self._control_weighting)
             p += r_bar
         else:
             r_bar = None
 
-        if self._control_delta_weighting:
+        if self._control_delta_weighting is not None:
             r_delta_bar = np.kron(np.eye(self._horizon),
                                   self._control_delta_weighting)
             d_bar = _build_delta_matrix(n_total_control, n_control)
@@ -454,7 +454,7 @@ class Mpc:
         e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
         q = c_bar_m_u.T @ q_bar @ e_y
 
-        if self._control_delta_weighting:
+        if self._control_delta_weighting is not None:
             d_bar = _build_delta_matrix(self._mpc_dim,
                                         self._system.n_control)
             r_delta_bar = self._qp_internal.r_delta_bar
