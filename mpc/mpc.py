@@ -100,6 +100,26 @@ class Mpc:
 
         self._result = None
 
+        n_output = self._system.n_output
+        n_control = self._system.n_control
+        if self._output_weighting.shape != (n_output, n_output):
+            raise ValueError(
+                'shape of `output_weighting` should be '
+                f'{(n_output, n_output)}, got '
+                f'{self._output_weighting.shape}')
+        if (self._control_weighting is not None) and \
+           (self._control_weighting.shape != (n_control, n_control)):
+            raise ValueError(
+                'shape of `control_weighting` should be '
+                f'{(n_control, n_control)}, got '
+                f'{self._control_weighting.shape}')
+        if (self._control_delta_weighting is not None) and \
+           (self._control_delta_weighting.shape != (n_control, n_control)):
+            raise ValueError(
+                'shape of `control_weighting` should be '
+                f'{(n_control, n_control)}, got '
+                f'{self._control_delta_weighting.shape}')
+
     @property
     def result(self):
         """Return the lastest verbose result."""
