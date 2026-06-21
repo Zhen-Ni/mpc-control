@@ -11,25 +11,26 @@ Classes:
     DiscreteSystem: abstract base class for discrete-time systems.
     LtiSystem: discrete linear time-invariant system.
     NonlinearSystem: generalized discrete non-linear system.
-
+    HomogeneousSystem: discrete homogeneous non-linear system.
 """
 
 from __future__ import annotations
 
 import abc
-from typing import Optional, Callable
+from typing import Optional, Callable, override, final
 import numpy as np
 
 
-__all__ = ('DiscreteSystem', 'LtiSystem', 'NonlinearSystem')
+__all__ = ('LtiSystem', 'AtiSystem',
+           'HomogeneousSystem', 'NonlinearSystem')
 
 
-class DiscreteSystem(abc.ABC):
+class Discrete(abc.ABC):
     """Abstract base class for discrete-time systems.
 
     The system can be written as:
-        x[n+1] = A(x[n], u[n]) @ x[n] + B(x[n], u[n]) @ u[n]
-        y[n] = C(x[n]) @ x[n]
+        x[n+1] = f(x[n], u[n])
+        y[n] = g(x[n])
     """
 
     @abc.abstractproperty
@@ -51,7 +52,7 @@ class DiscreteSystem(abc.ABC):
     def _linearize_transition(self,
                               state: Optional[np.ndarray] = None,
                               control: Optional[np.ndarray] = None
-                              ) -> tuple[np.ndarray, np.ndarray]:
+                              ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Linearize the state transition function.
 
         Args:
@@ -59,8 +60,9 @@ class DiscreteSystem(abc.ABC):
             control: current control input of shape (n_control, ).
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: the transition matrix A and
-                control matrix B.
+            tuple[np.ndarray, np.ndarray, np.ndarray]: the transition
+                matrix A, control matrix B, and disturbance d.
+
         """
         ...
 
@@ -81,7 +83,7 @@ class DiscreteSystem(abc.ABC):
     def linearize(self,
                   state: Optional[np.ndarray] = None,
                   control: Optional[np.ndarray] = None
-                  ) -> LtiSystem:
+                  ) -> AffineTimeInvariant:
         """Return the lti system based on given states.
 
         Args:
@@ -91,11 +93,12 @@ class DiscreteSystem(abc.ABC):
         Returns:
             LtiSystem: the linearized system.
         """
-        transition_matrix, control_matrix = \
+        transition_matrix, control_matrix, disturbance_vector = \
             self._linearize_transition(state, control)
         output_matrix = self._linearize_output(state)
-        return LtiSystem(transition_matrix,
+        return AtiSystem(transition_matrix,
                          control_matrix,
+                         disturbance_vector,
                          output_matrix)
 
     def _get_state_one_step(self,
@@ -105,13 +108,13 @@ class DiscreteSystem(abc.ABC):
 
         Args:
             state: current state vector of shape (n_state, ).
-            control: current control input of shape (ncontrol, ).
+            control: current control input of shape (n_control, ).
 
         Returns:
             np.ndarray: the state sequence of shape (n_state,).
         """
-        a, b = self._linearize_transition(state, control)
-        return a @ state + b @ control
+        a, b, d = self._linearize_transition(state, control)
+        return a @ state + b @ control + d
 
     def get_state(self,
                   initial_state: np.ndarray,
@@ -121,10 +124,10 @@ class DiscreteSystem(abc.ABC):
 
         Args:
             initial_state: the initial state of shape (n_state, ).
-            controls: the control input of shape (nsteps, ncontrol).
+            controls: the control input of shape (n_steps, n_control).
 
         Returns:
-            np.ndarray: the state sequence of shape (nsteps, n_state).
+            np.ndarray: the state sequence of shape (n_steps, n_state).
         """
         n = controls.shape[0]
         xs = np.zeros([n, self.n_state])
@@ -155,11 +158,11 @@ class DiscreteSystem(abc.ABC):
         """Evaluate the outputs based on given states.
 
         Args:
-            states: the state sequence of shape (nsteps, n_state),
+            states: the state sequence of shape (n_steps, n_state),
                     typically obtained from get_state().
 
         Returns:
-            np.ndarray: the output sequence of shape (nsteps, n_output).
+            np.ndarray: the output sequence of shape (n_steps, n_output).
         """
         n = states.shape[0]
         ys = np.zeros([n, self.n_output])
@@ -168,7 +171,147 @@ class DiscreteSystem(abc.ABC):
         return ys
 
 
-class LtiSystem(DiscreteSystem):
+class AffineTimeInvariant(Discrete):
+    """Base class (trait) for affine time invariant (ATI) systems.
+
+    x[n+1] = A @ x[n] + B @ u[n] + d
+    y[n] = C @ x[n]
+    """
+
+    @abc.abstractproperty
+    def transition_matrix(self) -> np.ndarray:
+        """Return the state transition matrix A."""
+        ...
+
+    @abc.abstractproperty
+    def control_matrix(self) -> np.ndarray:
+        """Return the control matrix B."""
+        ...
+
+    @abc.abstractproperty
+    def disturbance_vector(self) -> np.ndarray:
+        """Return the disturbance vector d."""
+        ...
+
+    @abc.abstractproperty
+    def output_matrix(self) -> np.ndarray:
+        """Return the output matrix C."""
+        ...
+
+    @override
+    def _linearize_transition(self,
+                              state: Optional[np.ndarray] = None,
+                              control: Optional[np.ndarray] = None
+                              ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Linearize the state transition function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+            control: current control input of shape (n_control, ).
+
+        Returns:
+            tuple[np.ndarray, np.ndarray, np.ndarray]: the transition
+                matrix A, control matrix B, and disturbance d.
+
+        """
+        return (self.transition_matrix,
+                self.control_matrix,
+                self.disturbance_vector)
+
+    @override
+    def _linearize_output(self,
+                          state: Optional[np.ndarray] = None,
+                          ) -> np.ndarray:
+        """Linearize the output function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+
+        Returns:
+            np.ndarray: the output matrix C.
+        """
+        return self.output_matrix
+
+
+@final
+class AtiSystem(AffineTimeInvariant):
+    """Affine time invariant system.
+
+    x[n+1] = A @ x[n] + B @ u[n] + d
+    y[n] = C @ x[n]
+    """
+
+    def __init__(self,
+                 transition_matrix: np.ndarray,
+                 control_matrix: np.ndarray,
+                 disturbance_vector: np.ndarray,
+                 output_matrix: np.ndarray
+                 ):
+        """Initialize the ATI system.
+
+        Args:
+            transition_matrix: the state transition matrix A of shape
+                (n_state, n_state).
+            control_matrix: the control matrix B of shape
+                (n_state, n_control).
+            disturbance_vector: the disturbance vector d of shape
+                (n_state,).
+            output_matrix: the output matrix C of shape
+                (n_output, n_state).
+        """
+        self._a = np.asarray(transition_matrix)
+        self._b = np.asarray(control_matrix)
+        self._d = np.asarray(disturbance_vector)
+        self._c = np.asarray(output_matrix)
+        self._n_state = self._a.shape[0]
+        self._n_control = self._b.shape[1]
+        self._n_output = self._c.shape[0]
+
+    @override
+    @property
+    def n_state(self) -> int:
+        """Dimension of state vector."""
+        return self._n_state
+
+    @override
+    @property
+    def n_control(self) -> int:
+        """Dimension of control vector."""
+        return self._n_control
+
+    @override
+    @property
+    def n_output(self) -> int:
+        """Dimension of output vector."""
+        return self._n_output
+
+    @override
+    @property
+    def transition_matrix(self) -> np.ndarray:
+        """Return the state transition matrix A."""
+        return self._a
+
+    @override
+    @property
+    def control_matrix(self) -> np.ndarray:
+        """Return the control matrix B."""
+        return self._b
+
+    @override
+    @property
+    def disturbance_vector(self) -> np.ndarray:
+        """Return the disturbance vector d."""
+        return self._d
+
+    @override
+    @property
+    def output_matrix(self) -> np.ndarray:
+        """Return the output matrix C."""
+        return self._c
+
+
+@final
+class LtiSystem(AffineTimeInvariant):
     """
     Discrete Linear Time-Invariant System.
 
@@ -192,88 +335,60 @@ class LtiSystem(DiscreteSystem):
             output_matrix: the output matrix C of shape
                 (n_output, n_state).
         """
-        self._a = transition_matrix
-        self._b = control_matrix
-        self._c = output_matrix
+        self._a = np.asarray(transition_matrix)
+        self._b = np.asarray(control_matrix)
+        self._c = np.asarray(output_matrix)
         self._n_state = self._a.shape[0]
         self._n_control = self._b.shape[1]
         self._n_output = self._c.shape[0]
 
-        # Input validation
-        if (self._a.shape[1] != self._n_state or
-            self._b.shape[0] != self._n_state or
-                self._c.shape[1] != self._n_state):
-            raise ValueError(
-                "Dimension of "
-                "state_transiton matrix "
-                f"[{self._a.shape[0]}, {self._a.shape[1]}], "
-                "control_matrix "
-                f"[{self._b.shape[0]}, {self._b.shape[1]}], "
-                "output_matrix "
-                f"[{self._c.shape[0]}, {self._c.shape[1]}], "
-                "incorrect")
-
+    @override
     @property
     def n_state(self) -> int:
         """Dimension of state vector."""
         return self._n_state
 
+    @override
     @property
     def n_control(self) -> int:
         """Dimension of control vector."""
         return self._n_control
 
+    @override
     @property
     def n_output(self) -> int:
         """Dimension of output vector."""
         return self._n_output
 
-    def _linearize_transition(self,
-                              _state: Optional[np.ndarray] = None,
-                              _control: Optional[np.ndarray] = None
-                              ) -> tuple[np.ndarray, np.ndarray]:
-        """Linearize the state transition function.
-
-        Args:
-            _state: current state vector (unused in LTI).
-            _control: current control input (unused in LTI).
-
-        Returns:
-            tuple[np.ndarray, np.ndarray]: the transition matrix A and
-                control matrix B.
-        """
-        return (self.get_transition_matrix(),
-                self.get_control_matrix())
-
-    def _linearize_output(self,
-                          _state: Optional[np.ndarray] = None,
-                          ) -> np.ndarray:
-        """Linearize the output function.
-
-        Args:
-            _state: current state vector (unused in LTI).
-
-        Returns:
-            np.ndarray: the output matrix C.
-        """
-        return self.get_output_matrix()
-
-    def get_transition_matrix(self) -> np.ndarray:
+    @override
+    @property
+    def transition_matrix(self) -> np.ndarray:
         """Return the state transition matrix A."""
         return self._a
 
-    def get_control_matrix(self) -> np.ndarray:
+    @override
+    @property
+    def control_matrix(self) -> np.ndarray:
         """Return the control matrix B."""
         return self._b
 
-    def get_output_matrix(self) -> np.ndarray:
+    @override
+    @property
+    def disturbance_vector(self) -> np.ndarray:
+        """Return the disturbance vector d."""
+        return np.zeros([self.n_state])
+
+    @override
+    @property
+    def output_matrix(self) -> np.ndarray:
         """Return the output matrix C."""
         return self._c
 
 
-class NonlinearSystem(DiscreteSystem):
+@final
+class HomogeneousSystem(Discrete):
     """
-    Discrete non-linear System.
+    Discrete non-linear homogeneous system.
 
     Equation:
         x[n+1] = A(x[n], u[n]) @ x[n] + B(x[n], u[n]) @ u[n]
@@ -291,7 +406,7 @@ class NonlinearSystem(DiscreteSystem):
                                      np.ndarray],
             output_matrix: Callable[[np.ndarray],
                                     np.ndarray]):
-        """Initialize the discrete non-linear system with linear Jacobian.
+        """Initialize the discrete non-linear system with disturbance.
 
         Args:
             n_state: dimension of the state vector.
@@ -314,25 +429,31 @@ class NonlinearSystem(DiscreteSystem):
         self._b = control_matrix
         self._c = output_matrix
 
+    @override
     @property
     def n_state(self) -> int:
         """Dimension of state vector."""
         return self._n_state
 
+    @override
     @property
     def n_control(self) -> int:
         """Dimension of control vector."""
         return self._n_control
 
+    @override
     @property
     def n_output(self) -> int:
         """Dimension of output vector."""
         return self._n_output
 
+    @override
     def _linearize_transition(self,
                               state: Optional[np.ndarray] = None,
                               control: Optional[np.ndarray] = None
-                              ) -> tuple[np.ndarray, np.ndarray]:
+                              ) -> tuple[np.ndarray,
+                                         np.ndarray,
+                                         np.ndarray]:
         """Linearize the state transition function.
 
         Args:
@@ -340,15 +461,128 @@ class NonlinearSystem(DiscreteSystem):
             control: current control input of shape (n_control, ).
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: the transition matrix A and
-                control matrix B.
+            tuple[np.ndarray, np.ndarray, np.ndarray]: the transition
+                matrix A, control matrix B, and disturbance d.
         """
         if state is None:
             raise ValueError('state can not be None')
         if control is None:
             raise ValueError('control can not be None')
-        return self._a(state, control), self._b(state, control)
+        return (self._a(state, control),
+                self._b(state, control),
+                np.zeros([self.n_state]))
 
+    @override
+    def _linearize_output(self,
+                          state: Optional[np.ndarray] = None,
+                          ) -> np.ndarray:
+        """Linearize the output function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+
+        Returns:
+            np.ndarray: the output matrix C.
+        """
+        if state is None:
+            raise ValueError('state can not be None')
+        return self._c(state)
+
+
+@final
+class NonlinearSystem(Discrete):
+    """
+    Discrete non-linear System.
+
+    Equation:
+        x[n+1] = A(x[n], u[n]) @ x[n] + B(x[n], u[n]) @ u[n] + d(x[n], u[n])
+        y[n] = C(x[n]) @ x[n]
+    """
+
+    def __init__(
+            self,
+            n_state: int,
+            n_control: int,
+            n_output: int,
+            transition_matrix: Callable[[np.ndarray, np.ndarray],
+                                        np.ndarray],
+            control_matrix: Callable[[np.ndarray, np.ndarray],
+                                     np.ndarray],
+            disturbance_vector: Callable[[np.ndarray, np.ndarray],
+                                         np.ndarray],
+            output_matrix: Callable[[np.ndarray],
+                                    np.ndarray]):
+        """Initialize the discrete non-linear system with disturbance.
+
+        Args:
+            n_state: dimension of the state vector.
+            n_control: dimension of the control vector.
+            n_output: dimension of the output vector.
+            transition_matrix: callable that returns the state transition
+                matrix A. Signature: A(state, control) -> np.ndarray of
+                shape (n_state, n_state).
+            control_matrix: callable that returns the control matrix B.
+                Signature: B(state, control) -> np.ndarray of shape
+                (n_state, n_control).
+            disturbance_vector: callable that returns the disturbance
+                vector vector d. Signature: d(state, control) -> np.ndarray
+                of shape (n_state,).
+            output_matrix: callable that returns the output matrix C.
+                Signature: C(state) -> np.ndarray of shape
+                (n_output, n_state).
+        """
+        self._n_state = n_state
+        self._n_control = n_control
+        self._n_output = n_output
+        self._a = transition_matrix
+        self._b = control_matrix
+        self._d = disturbance_vector
+        self._c = output_matrix
+
+    @override
+    @property
+    def n_state(self) -> int:
+        """Dimension of state vector."""
+        return self._n_state
+
+    @override
+    @property
+    def n_control(self) -> int:
+        """Dimension of control vector."""
+        return self._n_control
+
+    @override
+    @property
+    def n_output(self) -> int:
+        """Dimension of output vector."""
+        return self._n_output
+
+    @override
+    def _linearize_transition(self,
+                              state: Optional[np.ndarray] = None,
+                              control: Optional[np.ndarray] = None
+                              ) -> tuple[np.ndarray,
+                                         np.ndarray,
+                                         np.ndarray]:
+        """Linearize the state transition function.
+
+        Args:
+            state: current state vector of shape (n_state, ).
+            control: current control input of shape (n_control, ).
+
+        Returns:
+            tuple[np.ndarray, np.ndarray, np.ndarray]: the transition
+                matrix A, control matrix B, and disturbance d.
+        """
+        if state is None:
+            raise ValueError('state can not be None')
+        if control is None:
+            raise ValueError('control can not be None')
+        return (self._a(state, control),
+                self._b(state, control),
+                self._d(state, control))
+
+    @override
     def _linearize_output(self,
                           state: Optional[np.ndarray] = None,
                           ) -> np.ndarray:

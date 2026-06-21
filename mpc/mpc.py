@@ -8,7 +8,7 @@ from scipy.sparse import csc_matrix
 
 import osqp
 
-from .discrete import DiscreteSystem, LtiSystem
+from .discrete import Discrete, AffineTimeInvariant
 
 
 def _build_delta_matrix(qp_dim, n_control) -> np.ndarray:
@@ -24,14 +24,12 @@ def _build_delta_matrix(qp_dim, n_control) -> np.ndarray:
 
 @dataclass
 class _QpInternal:
-    m_x: np.ndarray
-    m_u: np.ndarray
-    c_bar: np.ndarray
     q_bar: np.ndarray
     r_bar: Optional[np.ndarray]
     r_delta_bar: Optional[np.ndarray]
-    c_bar_m_x: np.ndarray
-    c_bar_m_u: np.ndarray
+    c_bar_m_x: np.ndarray       # c_bar @ m_x
+    c_bar_m_u: np.ndarray       # c_bar @ m_u
+    c_bar_m_d_d: np.ndarray     # c_bar @ m_d @ d
     p: np.ndarray
     q: np.ndarray
 
@@ -59,7 +57,7 @@ class Mpc:
     """Model Predictive Controller.
 
     For discrete time-invariant systems:
-        x[n+1] = A * x[n] + B * u[n]
+        x[n+1] = A * x[n] + B * u[n] + d
         y[n]   = C * x[n]
     Formulates and solves a QP problem using OSQP:
         min  0.5 * U^T * P * U + q^T * U
@@ -74,7 +72,7 @@ class Mpc:
 
     def __init__(
         self,
-        system: DiscreteSystem,
+        system: Discrete,
         horizon: int,
         output_weighting: np.ndarray,
         control_weighting: Optional[np.ndarray] = None,
@@ -84,7 +82,7 @@ class Mpc:
         Initialize the mpc solver.
 
         Args:
-            system: The discrete LTI system object.
+            system: The discrete system object.
             horizon: Prediction horizon (N).
             output_weighting: (n_output, n_output).
             control_weighting: (n_control, n_control).
@@ -218,70 +216,103 @@ class Mpc:
     def _assemble_linear_qp_helper(
             self,
             state_ref, control_ref, n_state, n_control, n_output,
-            m_x, m_u, c_bar):
+            c_bar_m_x, c_bar_m_u, c_bar_m_d_d):
         """Assemble the qp intermediate matrixes inplace."""
-        a = self._system.get_transition_matrix()
-        b = self._system.get_control_matrix()
-        c = self._system.get_output_matrix()
+        a = self._system.transition_matrix
+        b = self._system.control_matrix
+        d = self._system.disturbance_vector
+        c = self._system.output_matrix
 
-        a_last = np.eye(n_state)
+        c_a_powers = np.zeros([self._horizon + 1, n_output, n_state])
+        c_a_powers[0] = c
+        c_a_sum = np.zeros([n_output, n_state])
+
         for i in range(self._horizon):
-            start_idx_x = n_state * i
-            stop_idx_x = start_idx_x + n_state
-            m_x[start_idx_x: stop_idx_x] = a @ a_last
+            c_a_powers[i+1] = c_a_powers[i] @ a
 
-            start_idx_u = i * n_control
-            stop_idx_u = start_idx_u + n_control
-            m_u[start_idx_x: stop_idx_x, :n_control] = a_last @ b
-            if i:
-                mu_prev = m_u[start_idx_x - n_state: start_idx_x,
-                              :start_idx_u]
-                m_u[start_idx_x: stop_idx_x, n_control: stop_idx_u] = mu_prev
+            # Build c_bar_m_x, c_bar_m_u, c_bar_m_d_d
+            start_idx = n_output * i
+            stop_idx = start_idx + n_output
 
-            # Build C_bar
-            start_idx_y = n_output * i
-            stop_idx_y = start_idx_y + n_output
-            c_bar[start_idx_y: stop_idx_y, start_idx_x: stop_idx_x] = c
+            # c_bar_m_x
+            c_bar_m_x[start_idx: stop_idx, :] = c_a_powers[i+1]
 
-            # Update a_last for next iteration
-            a_last = m_x[start_idx_x: stop_idx_x]
+            # c_bar_m_u
+            c_bar_m_u[start_idx: stop_idx, : (i+1)*n_control] = \
+                np.einsum('ijk,kl->jil',
+                          c_a_powers[i::-1],
+                          b).reshape(n_output, -1)
+
+            # c_bar_m_d_d
+            c_a_sum += c_a_powers[i]
+            c_bar_m_d_d[start_idx: stop_idx] = (c_a_sum @ d).reshape(-1)
 
     def _assemble_nonlinear_qp_helper(
             self,
             state_ref, control_ref, n_state, n_control, n_output,
-            m_x, m_u, c_bar):
+            c_bar_m_x, c_bar_m_u, c_bar_m_d_d):
         """Assemble the qp intermediate matrixes inplace."""
         if state_ref is None:
             state_ref = [None] * self._horizon
         if control_ref is None:
             control_ref = [None] * self._horizon
 
-        a_last = np.eye(n_state)
+        m_d = np.zeros([self._horizon, self._horizon,
+                        n_state, n_state])
+        c_bar_m_d_i = np.zeros([self._horizon, n_output, n_state])
+        a_0 = np.zeros([n_state, n_state])
+
+        # Store control_matrix and disturbane vectors.
+        bs = np.zeros([self._horizon, n_state, n_control])
+        ds = np.zeros([self._horizon, n_state])
+
         for i in range(self._horizon):
             system = self._system.linearize(state_ref[i], control_ref[i])
-            a_i = system.get_transition_matrix()
-            b_i = system.get_control_matrix()
-            c_i = system.get_output_matrix()
+            a_i = system.transition_matrix
+            b_i = system.control_matrix
+            d_i = system.disturbance_vector
+            c_i = system.output_matrix
 
-            start_idx_x = n_state * i
-            stop_idx_x = start_idx_x + n_state
-            m_x[start_idx_x: stop_idx_x] = a_i @ a_last
+            # Build m_d
+            m_d[i, i] = np.eye(n_state)
+            # Use vectorized operation for better performance
+            # for j in range(i):
+            #     m_d[i, j] = a_i @ m_d[i - 1, j]
+            m_d[i, :i] = a_i @ m_d[i - 1, :i]
 
-            start_idx_u = i * n_control
-            stop_idx_u = start_idx_u + n_control
-            m_u[start_idx_x: stop_idx_x, start_idx_u: stop_idx_u] = b_i
-            if i:
-                mu_prev = m_u[start_idx_x - n_state: start_idx_x,
-                              :start_idx_u]
-                m_u[start_idx_x: stop_idx_x, :start_idx_u] = a_i @ mu_prev
+            # Cache c_bar_m_d_i for this horizon.
+            # Use vectorized operation for better performance
+            # for j in range(i + 1):
+            #     c_bar_m_d_i[j] = c_i @ m_d[i, j]
+            c_bar_m_d_i[:i+1] = c_i @ m_d[i, :i + 1]
 
-            # Build C_bar
-            start_idx_y = n_output * i
-            stop_idx_y = start_idx_y + n_output
-            c_bar[start_idx_y: stop_idx_y, start_idx_x: stop_idx_x] = c_i
+            # Build c_bar_m_x
+            if i == 0:
+                a_0 = a_i
+            start_idx = n_output * i
+            stop_idx = start_idx + n_output
+            c_bar_m_x[start_idx: stop_idx, :] = c_bar_m_d_i[0] @ a_0
 
-            # Update a_last for next iteration
-            a_last = m_x[start_idx_x: stop_idx_x]
+            # Build c_bar_m_u
+            bs[i] = b_i
+            # Use vectorized operation for better performance.
+            # for j in range(i + 1):
+            #     row_start_idx = n_control * j
+            #     row_stop_idx = row_start_idx + n_control
+            #     c_bar_m_u[start_idx: stop_idx, row_start_idx: row_stop_idx] = \
+            #         c_bar_m_d_i[j] @ bs[j]
+            c_bar_m_u[start_idx: stop_idx, :n_control*(i+1)] = \
+                np.einsum('ijk,ikl->jil',
+                          c_bar_m_d_i[:i+1],
+                          bs[:i+1]).reshape(n_output, -1)
+
+            # Build c_bar_m_d_d
+            ds[i] = d_i
+            # Use vectorized operation for better performance.
+            # c_bar_m_d_d[start_idx: stop_idx] = \
+            # sum([c_bar_m_d_i[j] @ ds[j] for j in range(i+1)])
+            c_bar_m_d_d[start_idx: stop_idx] = \
+                np.einsum('ijk,ik->j', c_bar_m_d_i[:i+1], ds[:i+1])
 
     def _build_qp(self,
                   target_output: np.ndarray,
@@ -301,9 +332,9 @@ class Mpc:
            U = [u_0^T, u_1^T, ..., u_{N-1}^T]^T
            Y = [y_1^T, y_2^T, ..., y_N^T]^T
 
-           X = M_x * x_0 + M_u * U
+           X = M_x * x_0 + M_u * U + M_d * d
            Y = C_bar * X
-             = C_bar * M_x * x_0 + C_bar * M_u * U
+             = C_bar * M_x * x_0 + C_bar * M_u * U + C_bar * M_d * d
 
         2. Cost function:
            J = (Y - Y_ref)^T * Q_bar * (Y - Y_ref)
@@ -315,7 +346,7 @@ class Mpc:
            previous control input)
 
         3. OSQP standard form (min 0.5 * U^T * P * U + q^T * U):
-           Let E_y = C_bar * M_x * x_0 - Y_ref
+           Let E_y = C_bar * M_x * x_0 + C_bar * M_d * d - Y_ref
            Expanding the cost function and extracting the
         quadratic and linear terms (ignoring constant terms):
            J = 0.5 * U^T * (2 * M_u^T * C_bar^T * Q_bar * C_bar * M_u
@@ -347,32 +378,29 @@ class Mpc:
         n_control = self._system.n_control
         n_output = self._system.n_output
 
-        n_total_state = self._horizon * n_state
         n_total_output = self._horizon * n_output
         n_total_control = self._mpc_dim
 
         # Build M_x, M_u, C_bar
-        m_x = np.zeros([n_total_state, n_state])
-        m_u = np.zeros([n_total_state, self._mpc_dim])
-        c_bar = np.zeros([n_total_output, n_total_state])
-        if isinstance(self._system, LtiSystem):
+        c_bar_m_x = np.zeros([n_total_output, n_state])
+        c_bar_m_u = np.zeros([n_total_output, self._mpc_dim])
+        c_bar_m_d_d = np.zeros([n_total_output, ])
+        if isinstance(self._system, AffineTimeInvariant):
             self._assemble_linear_qp_helper(
                 state_ref, control_ref, n_state, n_control, n_output,
-                m_x, m_u, c_bar)
+                c_bar_m_x, c_bar_m_u, c_bar_m_d_d)
         else:
             self._assemble_nonlinear_qp_helper(
                 state_ref, control_ref, n_state, n_control, n_output,
-                m_x, m_u, c_bar)
+                c_bar_m_x, c_bar_m_u, c_bar_m_d_d)
 
         # Build internal matrixes
         q_bar = np.kron(np.eye(self._horizon),
                         self._output_weighting)
 
         # Calculate P and q for output (y).
-        c_bar_m_x = c_bar @ m_x
-        c_bar_m_u = c_bar @ m_u
         y_ref_vec = target_output.reshape(-1)
-        e_y = (c_bar_m_x @ initial_state).reshape(-1) - y_ref_vec
+        e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
         p = c_bar_m_u.T @ q_bar @ c_bar_m_u
         control_bar = np.zeros(self._mpc_dim)
         control_bar[:self._system.n_control] = initial_control
@@ -396,11 +424,10 @@ class Mpc:
         else:
             r_delta_bar = None
 
-        self._qp_internal = _QpInternal(m_x, m_u,
-                                        c_bar, q_bar, r_bar,
-                                        r_delta_bar,
-                                        c_bar_m_x, c_bar_m_u,
-                                        p, q)
+        self._qp_internal = _QpInternal(
+            q_bar, r_bar, r_delta_bar,
+            c_bar_m_x, c_bar_m_u, c_bar_m_d_d,
+            p, q)
 
     def _update_qp(self,
                    target_output: np.ndarray,
@@ -411,7 +438,7 @@ class Mpc:
 
         This method should only be used when initial state or target
         output is changed. Do not rely on this method if the system
-        matrixes are changed.
+        matrixes or disturbance vectors are changed.
 
         """
         if self._qp_internal is None:
@@ -420,9 +447,11 @@ class Mpc:
                 'problem is built by `_build_qp`')
         c_bar_m_x = self._qp_internal.c_bar_m_x
         c_bar_m_u = self._qp_internal.c_bar_m_u
+        c_bar_m_d_d = self._qp_internal.c_bar_m_d_d
         q_bar = self._qp_internal.q_bar
         y_ref_vec = target_output.reshape(-1)
-        e_y = (c_bar_m_x @ initial_state).reshape(-1) - y_ref_vec
+
+        e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
         q = c_bar_m_u.T @ q_bar @ e_y
 
         if self._control_delta_weighting:
@@ -475,7 +504,8 @@ class Mpc:
 
         """
         warm_start = False if control_ref is None else True
-        use_cached = self._qp_internal and isinstance(self._system, LtiSystem)
+        use_cached = (self._qp_internal and
+                      isinstance(self._system, AffineTimeInvariant))
 
         if initial_control is None:
             if (self._control_delta_weighting is None and

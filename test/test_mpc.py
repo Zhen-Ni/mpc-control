@@ -84,7 +84,7 @@ class TestMpc(unittest.TestCase):
         def C(x):
             return np.array([1., 0.]).reshape(1, 2)
 
-        s = mpc.NonlinearSystem(2, 1, 1, A, B, C)
+        s = mpc.HomogeneousSystem(2, 1, 1, A, B, C)
         x0 = np.array([1., 0.])
         horizon = 50
         n_sim = 100
@@ -118,6 +118,55 @@ class TestMpc(unittest.TestCase):
         self.assertAlmostEqual(uncontrolled_output[-1, 0], 0.)
         # Predicted output should never be precise without iteration
         # for linear system.
+        self.assertFalse(np.allclose(predicted_output[-5:], 1.))
+        self.assertTrue(np.allclose(y[-10:], 1.))
+
+    def test_nonlinear_control_with_disturbance(self):
+        """Maintain the output of a nonlinear system with disturbance."""
+        def A(x, u):
+            return np.array([0.5, 1., 0., 0.5 + np.sin(u[0])]).reshape(2, 2)
+
+        def B(x, u):
+            return np.array([0., 1 + u[0]]).reshape(2, 1)
+
+        def d(x, u):
+            return np.array([0.1 + 0.1 * u[0], 0])
+
+        def C(x):
+            return np.array([1., 0.]).reshape(1, 2)
+
+        s = mpc.NonlinearSystem(2, 1, 1, A, B, d, C)
+        x0 = np.array([1., 0.])
+        horizon = 50
+        n_sim = 100
+        uncontrolled_state = s.get_state(x0, np.zeros([n_sim, 1]))
+        uncontrolled_output = s.get_output(uncontrolled_state)
+        # Maintain the target output to 1.
+        target_output = np.ones([horizon, s.n_output])
+        output_weighting_matrix = np.eye(s.n_output)
+        controller = mpc.Mpc(s, horizon,
+                             output_weighting_matrix)
+        predicted_control = controller.solve(
+            target_output, x0,
+            state_ref=np.stack([x0] * horizon),
+            control_ref=np.zeros([horizon, 1]))
+        predicted_state = s.get_state(x0, predicted_control)
+        predicted_output = s.get_output(predicted_state)
+
+        ui = np.zeros([horizon, 1])
+        xi = np.concat([[x0], s.get_state(x0, ui[:-1])])
+        y = np.zeros([n_sim])
+        for i in range(n_sim):
+            xi0 = xi[0]
+            for j in range(20):
+                ui = controller.solve(target_output, xi0,
+                                      state_ref=xi,
+                                      control_ref=ui)
+                xi = np.concat([[xi0], s.get_state(x0, ui[:-1])])
+            xi = s.get_state(xi0, ui)
+            y[i] = s.get_output(xi[:1])[0, 0]
+
+        self.assertAlmostEqual(uncontrolled_output[-1, 0], 0.2)
         self.assertFalse(np.allclose(predicted_output[-5:], 1.))
         self.assertTrue(np.allclose(y[-10:], 1.))
 
