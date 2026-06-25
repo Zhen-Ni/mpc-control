@@ -220,7 +220,7 @@ class TestMpc(unittest.TestCase):
         self.assertTrue((np.array(u_free) > ub + 1e-3).any())
         self.assertTrue((np.array(u_cons) < ub + 1e-3).all())
 
-    def test_constrained_input(self):
+    def test_constrained_output(self):
         """MPC control with constrained control output."""
         A = np.array([0.9, 1., 0., 0.5]).reshape(2, 2)
         B = np.array([0., 1.]).reshape(2, 1)
