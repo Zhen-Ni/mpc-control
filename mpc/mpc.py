@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 from dataclasses import dataclass
 import numpy as np
+from scipy.linalg import block_diag
 from scipy.sparse import csc_matrix
 
 import osqp
@@ -18,7 +19,7 @@ def _build_delta_matrix(qp_dim, n_control) -> np.ndarray:
     Return D_bar s.t. ΔU = D_bar * U
     """
     d = np.eye(qp_dim)
-    dif = np.diag(np.ones(qp_dim-n_control), k=-n_control)
+    dif = np.eye(qp_dim, qp_dim, -n_control)
     return d - dif
 
 
@@ -37,9 +38,9 @@ class _QpInternal:
 @dataclass
 class _QpConstraint:
     modified: bool
-    output_bound: Optional[tuple[np.ndarray, np.ndarray]]
-    control_bound: Optional[tuple[np.ndarray, np.ndarray]]
-    control_delta_bound: Optional[tuple[np.ndarray, np.ndarray]]
+    output_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
+    control_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
+    control_delta_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
     a: np.ndarray
     lb: np.ndarray
     ub: np.ndarray
@@ -127,60 +128,111 @@ class Mpc:
 
     def set_output_limit(self,
                          lb: np.ndarray,
-                         ub: np.ndarray) -> None:
+                         ub: np.ndarray,
+                         proj: Optional[np.ndarray] = None
+                         ) -> None:
         """Set the limit of output values.
 
         Args:
-            lb: The lower bound with shape (horizon, n_output).
-            ub: The upper bound with shape (horizon, n_output).
+            lb: The lower bound with shape (horizon, m).
+            ub: The upper bound with shape (horizon, m).
+            proj: The linear transformation matrix for output
+                with shape (horizon, m, n_output). Default
+                to identity matrix (m = n_output).
         """
-        dim = (self._horizon, self._system.n_output)
-        if not lb.shape == dim:
-            raise ValueError(f'shape of lb should be {dim}, '
-                             f'got {lb.shape}')
-        if not ub.shape == dim:
-            raise ValueError(f'shape of ub should be {dim}, '
-                             f'got {ub.shape}')
+        if lb.shape != ub.shape:
+            raise ValueError(
+                f'shape of lb ({lb.shape}) and ub ({ub.shape}) must match')
+        if lb.ndim != 2 or lb.shape[0] != self._horizon:
+            raise ValueError(
+                f'shape of lb/ub should be ({self._horizon}, m), got {lb.shape}')
+
+        m = lb.shape[1]
+        n_output = self._system.n_output
+
+        if proj is None:
+            if m != n_output:
+                raise ValueError(f'proj must be provided if m ({
+                                 m}) != n_output ({n_output})')
+            proj = np.stack([np.eye(n_output)] * self._horizon)
+        elif proj.shape != (self._horizon, m, n_output):
+            raise ValueError(f'shape of proj should be {
+                             (self._horizon, m, n_output)}, got {proj.shape}')
+
         self._qp_constraint.modified = True
-        self._qp_constraint.output_bound = lb, ub
+        self._qp_constraint.output_bound = lb, ub, proj
 
     def set_control_limit(self,
                           lb: np.ndarray,
-                          ub: np.ndarray) -> None:
+                          ub: np.ndarray,
+                          proj: Optional[np.ndarray] = None
+                          ) -> None:
         """Set the input limit of control vectors.
 
         Args:
-            lb: The lower bound with shape (horizon, n_control).
-            ub: The upper bound with shape (horizon, n_control).
+            lb: The lower bound with shape (horizon, m).
+            ub: The upper bound with shape (horizon, m).
+            proj: The linear transformation matrix for control
+                with shape (horizon, m, n_control). Default
+                to identity matrix (m = n_control).
         """
-        dim = (self._horizon, self._system.n_control)
-        if not lb.shape == dim:
-            raise ValueError(f'shape of lb should be {dim}, '
-                             f'got {lb.shape}')
-        if not ub.shape == dim:
-            raise ValueError(f'shape of ub should be {dim}, '
-                             f'got {ub.shape}')
+        if lb.shape != ub.shape:
+            raise ValueError(
+                f'shape of lb ({lb.shape}) and ub ({ub.shape}) must match')
+        if lb.ndim != 2 or lb.shape[0] != self._horizon:
+            raise ValueError(
+                f'shape of lb/ub should be ({self._horizon}, m), got {lb.shape}')
+
+        m = lb.shape[1]
+        n_control = self._system.n_control
+
+        if proj is None:
+            if m != n_control:
+                raise ValueError(f'proj must be provided if m ({
+                                 m}) != n_control ({n_control})')
+            proj = np.stack([np.eye(n_control)] * self._horizon)
+        elif proj.shape != (self._horizon, m, n_control):
+            raise ValueError(f'shape of proj should be {
+                             (self._horizon, m, n_control)}, got {proj.shape}')
+
         self._qp_constraint.modified = True
-        self._qp_constraint.control_bound = lb, ub
+        self._qp_constraint.control_bound = lb, ub, proj
 
     def set_control_rate_limit(self,
                                lb: np.ndarray,
-                               ub: np.ndarray) -> None:
+                               ub: np.ndarray,
+                               proj: Optional[np.ndarray] = None
+                               ) -> None:
         """Set the limit of control changing rate.
 
         Args:
-            lb: The lower bound with shape (horizon, n_control).
-            ub: The upper bound with shape (horizon, n_control).
+            lb: The lower bound with shape (horizon, m).
+            ub: The upper bound with shape (horizon, m).
+            proj: The linear transformation matrix for control rate
+                with shape (horizon, m, n_control). Default
+                to identity matrix (m = n_control).
         """
-        dim = (self._horizon, self._system.n_control)
-        if not lb.shape == dim:
-            raise ValueError(f'shape of lb should be {dim}, '
-                             f'got {lb.shape}')
-        if not ub.shape == dim:
-            raise ValueError(f'shape of ub should be {dim}, '
-                             f'got {ub.shape}')
+        if lb.shape != ub.shape:
+            raise ValueError(
+                f'shape of lb ({lb.shape}) and ub ({ub.shape}) must match')
+        if lb.ndim != 2 or lb.shape[0] != self._horizon:
+            raise ValueError(
+                f'shape of lb/ub should be ({self._horizon}, m), got {lb.shape}')
+
+        m = lb.shape[1]
+        n_control = self._system.n_control
+
+        if proj is None:
+            if m != n_control:
+                raise ValueError(f'proj must be provided if m ({
+                                 m}) != n_control ({n_control})')
+            proj = np.stack([np.eye(n_control)] * self._horizon)
+        elif proj.shape != (self._horizon, m, n_control):
+            raise ValueError(f'shape of proj should be {
+                             (self._horizon, m, n_control)}, got {proj.shape}')
+
         self._qp_constraint.modified = True
-        self._qp_constraint.control_delta_bound = lb, ub
+        self._qp_constraint.control_delta_bound = lb, ub, proj
 
     def _build_constraints(self,
                            initial_state: np.ndarray,
@@ -197,36 +249,44 @@ class Mpc:
         lb_list = []
         ub_list = []
         if self._qp_constraint.control_bound:
-            a_list.append(np.eye(self._mpc_dim))
-            lb_list.append(self._qp_constraint.control_bound[0].reshape(-1))
-            ub_list.append(self._qp_constraint.control_bound[1].reshape(-1))
+            lb, ub, trans = self._qp_constraint.control_bound
+            trans = block_diag(*trans)
+            a = trans
+            lb_list.append(lb.reshape(-1))
+            ub_list.append(ub.reshape(-1))
+            a_list.append(a)
 
         if self._qp_constraint.output_bound:
-            a = self._qp_internal.c_bar_m_u
-            offset = self._qp_internal.c_bar_m_x @ initial_state
-            lb = self._qp_constraint.output_bound[0].reshape(-1) - offset
-            ub = self._qp_constraint.output_bound[1].reshape(-1) - offset
+            lb, ub, trans = self._qp_constraint.output_bound
+            trans = block_diag(*trans)
+            a = trans @ self._qp_internal.c_bar_m_u
+            offset = trans @ (self._qp_internal.c_bar_m_x @ initial_state +
+                              self._qp_internal.c_bar_m_d_d)
+            lb = lb.reshape(-1) - offset
+            ub = ub.reshape(-1) - offset
             a_list.append(a)
             lb_list.append(lb)
             ub_list.append(ub)
 
         if self._qp_constraint.control_delta_bound:
-            d_bar = _build_delta_matrix(self._mpc_dim, self._system.n_control)
-            control_bar = np.zeros(self._mpc_dim)
+            lb, ub, trans = self._qp_constraint.control_delta_bound
+            trans = block_diag(*trans)
+            d_bar = _build_delta_matrix(self._mpc_dim,
+                                        self._system.n_control)
+            control_bar = np.zeros([self._mpc_dim])
             control_bar[:self._system.n_control] = initial_control
-            a = d_bar
-            lb = (self._qp_constraint.control_delta_bound[0].reshape(-1) +
-                  control_bar)
-            ub = (self._qp_constraint.control_delta_bound[1].reshape(-1) +
-                  control_bar)
+            control_bar = trans @ control_bar
+            a = trans @ d_bar
+            lb = lb.reshape(-1) + control_bar
+            ub = ub.reshape(-1) + control_bar
             a_list.append(a)
             lb_list.append(lb)
             ub_list.append(ub)
 
         if a_list:
-            self._qp_constraint.a = np.concat(a_list)
-            self._qp_constraint.lb = np.concat(lb_list)
-            self._qp_constraint.ub = np.concat(ub_list)
+            self._qp_constraint.a = np.concatenate(a_list)
+            self._qp_constraint.lb = np.concatenate(lb_list)
+            self._qp_constraint.ub = np.concatenate(ub_list)
         else:
             self._qp_constraint.a = np.zeros([0, self._mpc_dim])
             self._qp_constraint.lb = np.zeros([0])
@@ -564,7 +624,7 @@ class Mpc:
                    warm_starting=warm_start, verbose=False,
                    **kwargs)
         if warm_start:
-            res = prob.warm_start(np.asarray(control_ref).reshape(-1))
+            prob.warm_start(np.asarray(control_ref).reshape(-1))
         res = prob.solve(raise_error=False)
         self._result = res
         if res.info.status == 'solved':

@@ -313,6 +313,42 @@ class TestMpc(unittest.TestCase):
         self.assertTrue((du_cons < ub + 1e-3).all()
                         and (du_cons > lb - 1e-3).all())
 
+    def test_constrained_input_with_transform(self):
+        """MPC control with constrained control input."""
+        A = np.zeros([2, 2])
+        B = np.eye(2)
+        C = np.eye(2)
+        s = mpc.LtiSystem(A, B, C)
+        x0 = np.array([0., 0.])  # Initial state
+        n_sim = 100             # Number of simulation steps
+        horizon = 50            # MPC horizon
+        bnd = 1                # bound of control input
+        t = np.linspace(0, 2, n_sim+horizon)
+        target_output = np.stack([t * np.cos(10 * t),
+                                  t * np.sin(10 * t)]).T
+        output_weighting = np.eye(s.n_output)
+        controller = mpc.Mpc(s, horizon,
+                             output_weighting)
+        bound = np.zeros([horizon, 2])
+        bound[:, 0] = 1.
+        trans = np.array([0, 1, 1, 0]).reshape(2, 2)
+        trans = np.array([trans] * horizon)
+        controller.set_control_limit(-bnd * bound,
+                                     bnd * bound,
+                                     trans)
+        xi = x0
+        y_cons = []
+        u_cons = []
+        for i in range(n_sim):
+            ui = controller.solve(target_output[i: i+horizon], xi)
+            xi = s.get_state(xi, ui[0:1]).reshape(-1)
+            y_cons.append(s.get_output(xi.reshape(1, -1)).reshape(-1))
+            u_cons.append(ui[0].reshape(-1))
+
+        # Check whether the constraint is valid.
+        self.assertTrue((np.array(u_cons)[:, 0] < 1e-3).all())
+        self.assertTrue((np.array(u_cons)[:, 1] < 1 + 1e-3).all())
+
 
 if __name__ == '__main__':
     unittest.main(argv=[''], exit=False)
