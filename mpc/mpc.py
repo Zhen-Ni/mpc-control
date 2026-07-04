@@ -3,6 +3,7 @@
 from __future__ import annotations
 from typing import Optional
 from dataclasses import dataclass
+
 import numpy as np
 from scipy.linalg import block_diag
 from scipy.sparse import csc_matrix
@@ -85,9 +86,9 @@ class Mpc:
         Args:
             system: The discrete system object.
             horizon: Prediction horizon (N).
-            output_weighting: (n_output, n_output).
-            control_weighting: (n_control, n_control).
-            control_delta_weighting: (n_control, n_control).
+            output_weighting: (horizon, n_output, n_output).
+            control_weighting: (horizon, n_control, n_control).
+            control_delta_weighting: (horizon, n_control, n_control).
         """
         self._system = system
         self._horizon = horizon
@@ -103,22 +104,25 @@ class Mpc:
 
         n_output = self._system.n_output
         n_control = self._system.n_control
-        if self._output_weighting.shape != (n_output, n_output):
+
+        if self._output_weighting.shape != (self._horizon, n_output, n_output):
             raise ValueError(
                 'shape of `output_weighting` should be '
-                f'{(n_output, n_output)}, got '
+                f'{(self._horizon, n_output, n_output)}, got '
                 f'{self._output_weighting.shape}')
         if (self._control_weighting is not None) and \
-           (self._control_weighting.shape != (n_control, n_control)):
+           (self._control_weighting.shape !=
+                (self._horizon, n_control, n_control)):
             raise ValueError(
                 'shape of `control_weighting` should be '
-                f'{(n_control, n_control)}, got '
+                f'{(self._horizon, n_control, n_control)}, got '
                 f'{self._control_weighting.shape}')
         if (self._control_delta_weighting is not None) and \
-           (self._control_delta_weighting.shape != (n_control, n_control)):
+           (self._control_delta_weighting.shape !=
+                (self._horizon, n_control, n_control)):
             raise ValueError(
-                'shape of `control_weighting` should be '
-                f'{(n_control, n_control)}, got '
+                'shape of `control_delta_weighting` should be '
+                f'{(self._horizon, n_control, n_control)}, got '
                 f'{self._control_delta_weighting.shape}')
 
     @property
@@ -145,7 +149,8 @@ class Mpc:
                 f'shape of lb ({lb.shape}) and ub ({ub.shape}) must match')
         if lb.ndim != 2 or lb.shape[0] != self._horizon:
             raise ValueError(
-                f'shape of lb/ub should be ({self._horizon}, m), got {lb.shape}')
+                f'shape of lb/ub should be ({self._horizon}, m), '
+                f'got {lb.shape}')
 
         m = lb.shape[1]
         n_output = self._system.n_output
@@ -181,7 +186,8 @@ class Mpc:
                 f'shape of lb ({lb.shape}) and ub ({ub.shape}) must match')
         if lb.ndim != 2 or lb.shape[0] != self._horizon:
             raise ValueError(
-                f'shape of lb/ub should be ({self._horizon}, m), got {lb.shape}')
+                f'shape of lb/ub should be ({self._horizon}, m), '
+                f'got {lb.shape}')
 
         m = lb.shape[1]
         n_control = self._system.n_control
@@ -217,7 +223,8 @@ class Mpc:
                 f'shape of lb ({lb.shape}) and ub ({ub.shape}) must match')
         if lb.ndim != 2 or lb.shape[0] != self._horizon:
             raise ValueError(
-                f'shape of lb/ub should be ({self._horizon}, m), got {lb.shape}')
+                f'shape of lb/ub should be ({self._horizon}, m), '
+                f'got {lb.shape}')
 
         m = lb.shape[1]
         n_control = self._system.n_control
@@ -453,7 +460,6 @@ class Mpc:
             control_ref: Reference control for system linearization.
 
         """
-
         n_state = self._system.n_state
         n_control = self._system.n_control
         n_output = self._system.n_output
@@ -475,8 +481,7 @@ class Mpc:
                 c_bar_m_x, c_bar_m_u, c_bar_m_d_d)
 
         # Build internal matrixes
-        q_bar = np.kron(np.eye(self._horizon),
-                        self._output_weighting)
+        q_bar = block_diag(*self._output_weighting)
 
         # Calculate P and q for output (y).
         y_ref_vec = target_output.reshape(-1)
@@ -487,15 +492,13 @@ class Mpc:
         q = c_bar_m_u.T @ q_bar @ e_y
 
         if self._control_weighting is not None:
-            r_bar = np.kron(np.eye(self._horizon),
-                            self._control_weighting)
+            r_bar = block_diag(*self._control_weighting)
             p += r_bar
         else:
             r_bar = None
 
         if self._control_delta_weighting is not None:
-            r_delta_bar = np.kron(np.eye(self._horizon),
-                                  self._control_delta_weighting)
+            r_delta_bar = block_diag(*self._control_delta_weighting)
             d_bar = _build_delta_matrix(n_total_control, n_control)
             control_bar = np.zeros(self._mpc_dim)
             control_bar[:self._system.n_control] = initial_control

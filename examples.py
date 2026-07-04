@@ -19,8 +19,8 @@ def example_1():
     uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
     uncontrolled_output = s.get_output(uncontrolled_state)
     target_output = np.zeros([horizon, s.n_output]) + 1.
-    output_weighting_matrix = np.eye(s.n_output)
-    control_weighting_matrix = np.eye(s.n_control)
+    output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
+    control_weighting_matrix = np.stack([np.eye(s.n_control)] * horizon)
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix)
@@ -70,8 +70,8 @@ def example_2():
     uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
     uncontrolled_output = s.get_output(uncontrolled_state)
     target_output = np.zeros([horizon, s.n_output])
-    output_weighting_matrix = np.eye(s.n_output)
-    control_weighting_matrix = np.eye(s.n_control)
+    output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
+    control_weighting_matrix = np.stack([np.eye(s.n_control)] * horizon)
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix)
@@ -124,9 +124,9 @@ def example_3():
     uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
     uncontrolled_output = s.get_output(uncontrolled_state)
     target_output = np.zeros([horizon, s.n_output]) + 1.
-    output_weighting_matrix = np.eye(s.n_output)
-    control_weighting_matrix = np.eye(s.n_control)
-    control_delta_weighting_matrix = np.eye(s.n_control) * 0
+    output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
+    control_weighting_matrix = np.stack([np.eye(s.n_control)] * horizon)
+    control_delta_weighting_matrix = np.stack([np.eye(s.n_control) * 0] * horizon)
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix,
@@ -179,9 +179,9 @@ def example_4():
     x0 = np.array([1., 0.])
     horizon = 50
     target_output = np.zeros([horizon, s.n_output]) + 1.
-    output_weighting_matrix = np.eye(s.n_output)
-    control_weighting_matrix = np.eye(s.n_control)
-    control_delta_weighting_matrix = np.eye(s.n_control) * 0
+    output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
+    control_weighting_matrix = np.stack([np.eye(s.n_control)] * horizon)
+    control_delta_weighting_matrix = np.stack([np.eye(s.n_control) * 0] * horizon)
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix,
@@ -236,9 +236,9 @@ def example_5():
     x0 = np.array([1., 0.])
     horizon = 50
     target_output = np.zeros([horizon, s.n_output]) + 1.
-    output_weighting_matrix = np.eye(s.n_output)
-    control_weighting_matrix = np.eye(s.n_control)
-    control_delta_weighting_matrix = np.eye(s.n_control) * 0
+    output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
+    control_weighting_matrix = np.stack([np.eye(s.n_control)] * horizon)
+    control_delta_weighting_matrix = np.stack([np.eye(s.n_control) * 0] * horizon)
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix,
@@ -296,9 +296,9 @@ def example_6():
     uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
     uncontrolled_output = s.get_output(uncontrolled_state)
     target_output = np.zeros([horizon, s.n_output]) + 1.
-    output_weighting_matrix = np.eye(s.n_output)
-    control_weighting_matrix = np.eye(s.n_control) * 0
-    control_delta_weighting_matrix = np.eye(s.n_control) * 100
+    output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
+    control_weighting_matrix = np.stack([np.eye(s.n_control) * 0] * horizon)
+    control_delta_weighting_matrix = np.stack([np.eye(s.n_control) * 100] * horizon)
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix,
@@ -345,8 +345,8 @@ def example_7():
     x0 = np.array([1., 0.])
     horizon = 50
     target_output = np.zeros([horizon, s.n_output]) + 1.
-    output_weighting_matrix = np.eye(s.n_output)
-    control_weighting_matrix = np.eye(s.n_control)
+    output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
+    control_weighting_matrix = np.stack([np.eye(s.n_control)] * horizon)
     controller = Mpc(s, horizon,
                      output_weighting_matrix,
                      control_weighting_matrix)

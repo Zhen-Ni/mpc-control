@@ -21,8 +21,8 @@ class TestMpc(unittest.TestCase):
         uncontrolled_state = s.get_state(x0, np.zeros([n_sim, 1]))
         uncontrolled_output = s.get_output(uncontrolled_state)
         target_output = np.zeros([horizon, s.n_output])
-        output_weighting = np.eye(s.n_output)
-        control_weighting = np.eye(s.n_control)
+        output_weighting = np.stack([np.eye(s.n_output)] * horizon)
+        control_weighting = np.stack([np.eye(s.n_control)] * horizon)
         controller = mpc.Mpc(s, horizon,
                              output_weighting,
                              control_weighting)
@@ -55,7 +55,7 @@ class TestMpc(unittest.TestCase):
         uncontrolled_state = s.get_state(x0, np.zeros([horizon, 1]))
         uncontrolled_output = s.get_output(uncontrolled_state)
         target_output = np.sin(2*np.pi * 0.02 * np.arange(n_sim+horizon))
-        output_weighting_matrix = np.eye(s.n_output)
+        output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
         # We do not use control weighting so that target output should
         # be tracked precisely.
         controller = mpc.Mpc(s, horizon,
@@ -92,7 +92,7 @@ class TestMpc(unittest.TestCase):
         uncontrolled_output = s.get_output(uncontrolled_state)
         # Maintain the target output to 1.
         target_output = np.ones([horizon, s.n_output])
-        output_weighting_matrix = np.eye(s.n_output)
+        output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
         controller = mpc.Mpc(s, horizon,
                              output_weighting_matrix)
         predicted_control = controller.solve(
@@ -143,7 +143,7 @@ class TestMpc(unittest.TestCase):
         uncontrolled_output = s.get_output(uncontrolled_state)
         # Maintain the target output to 1.
         target_output = np.ones([horizon, s.n_output])
-        output_weighting_matrix = np.eye(s.n_output)
+        output_weighting_matrix = np.stack([np.eye(s.n_output)] * horizon)
         controller = mpc.Mpc(s, horizon,
                              output_weighting_matrix)
         predicted_control = controller.solve(
@@ -182,8 +182,8 @@ class TestMpc(unittest.TestCase):
         lb = -0.1               # Lower bound of control input
         ub = 0.1                # Upper bound of control input
         target_output = np.ones([n_sim+horizon, s.n_output])
-        output_weighting = np.eye(s.n_output)
-        control_weighting = np.eye(s.n_control)
+        output_weighting = np.stack([np.eye(s.n_output)] * horizon)
+        control_weighting = np.stack([np.eye(s.n_control)] * horizon)
         controller = mpc.Mpc(s, horizon,
                              output_weighting,
                              control_weighting)
@@ -232,8 +232,8 @@ class TestMpc(unittest.TestCase):
         lb = -0.8               # Lower bound of controlled output
         ub = 0.8                # Upper bound of controlled output
         target_output = np.ones([n_sim+horizon, s.n_output])
-        output_weighting = np.eye(s.n_output)
-        control_weighting = np.eye(s.n_control)
+        output_weighting = np.stack([np.eye(s.n_output)] * horizon)
+        control_weighting = np.stack([np.eye(s.n_control)] * horizon)
         controller = mpc.Mpc(s, horizon,
                              output_weighting,
                              control_weighting)
@@ -275,8 +275,8 @@ class TestMpc(unittest.TestCase):
         lb = -0.01              # Lower bound of controlled output
         ub = 0.01               # Upper bound of controlled output
         target_output = np.ones([n_sim+horizon, s.n_output])
-        output_weighting = np.eye(s.n_output)
-        control_weighting = np.eye(s.n_control)
+        output_weighting = np.stack([np.eye(s.n_output)] * horizon)
+        control_weighting = np.stack([np.eye(s.n_control)] * horizon)
         controller = mpc.Mpc(s, horizon,
                              output_weighting,
                              control_weighting)
@@ -326,7 +326,7 @@ class TestMpc(unittest.TestCase):
         t = np.linspace(0, 2, n_sim+horizon)
         target_output = np.stack([t * np.cos(10 * t),
                                   t * np.sin(10 * t)]).T
-        output_weighting = np.eye(s.n_output)
+        output_weighting = np.stack([np.eye(s.n_output)] * horizon)
         controller = mpc.Mpc(s, horizon,
                              output_weighting)
         bound = np.zeros([horizon, 2])
@@ -348,6 +348,61 @@ class TestMpc(unittest.TestCase):
         # Check whether the constraint is valid.
         self.assertTrue((np.array(u_cons)[:, 0] < 1e-3).all())
         self.assertTrue((np.array(u_cons)[:, 1] < 1 + 1e-3).all())
+
+    def test_terminal_weighting(self):
+        """Test trajectory planning using terminal output weighting."""
+        # Use a double integrator system
+        A = np.array([1., 1., 0., 1.]).reshape(2, 2)
+        B = np.array([0., 1.]).reshape(2, 1)
+        C = np.array([1., 0.]).reshape(1, 2)
+        s = mpc.LtiSystem(A, B, C)
+
+        x0 = np.array([0., 0.])
+        horizon = 50
+        target_output = np.ones([horizon, s.n_output])
+        u0 = np.zeros([1])
+
+        # 1. Terminal weighting: output weight is 0 for the
+        # first N-1 steps, and 100 for the last step
+        terminal_ow = np.zeros([horizon, s.n_output, s.n_output])
+        terminal_ow[-1] = np.eye(s.n_output) * 100.0
+        cw = np.stack([np.eye(s.n_control) * 0.1] * horizon)
+
+        controller_terminal = mpc.Mpc(s, horizon,
+                                      terminal_ow,
+                                      cw)
+        u_pred_terminal = controller_terminal.solve(target_output, x0, u0)
+        y_pred_terminal = s.get_output(s.get_state(x0, u_pred_terminal))
+
+        # 2. Uniform weighting: all steps have an output weight
+        # of 100
+        uniform_ow = np.stack([np.eye(s.n_output) * 100.0] * horizon)
+        controller_uniform = mpc.Mpc(s, horizon,
+                                     uniform_ow,
+                                     cw)
+        u_pred_uniform = controller_uniform.solve(target_output, x0, u0)
+        y_pred_uniform = s.get_output(s.get_state(x0, u_pred_uniform))
+
+        # Assertion 1: With terminal weighting, the system indeed
+        # reaches the target at the last step
+        self.assertAlmostEqual(y_pred_terminal[-1, 0], 1.0, delta=1e-3)
+
+        # Assertion 2: With terminal weighting, since there is no
+        # tracking penalty in the early stages, the early output of
+        # the system should not tightly follow the target as with
+        # uniform weighting (i.e., a larger deviation is
+        # allowed). Under uniform weighting, the first step attempts
+        # to approach the target, whereas under terminal weighting,
+        # the early stages are slower.
+        self.assertTrue(y_pred_terminal[10, 0] < y_pred_uniform[10, 0])
+
+        # Assertion 3: Due to the lack of early output tracking
+        # pressure, the control energy used by terminal weighting
+        # should be less than (or equal to) that required by uniform
+        # weighting to tightly follow the target.
+        energy_terminal = np.sum(u_pred_terminal**2)
+        energy_uniform = np.sum(u_pred_uniform**2)
+        self.assertTrue(energy_terminal < energy_uniform)
 
 
 if __name__ == '__main__':
