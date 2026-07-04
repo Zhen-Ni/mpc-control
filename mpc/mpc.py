@@ -101,6 +101,7 @@ class Mpc:
         self._qp_constraint = _QpConstraint.new(self._mpc_dim)
 
         self._result = None
+        self._osqp: Optional[osqp.OSQP] = None
 
         n_output = self._system.n_output
         n_control = self._system.n_control
@@ -635,7 +636,6 @@ class Mpc:
             solved successfully.
 
         """
-        warm_start = False if control_ref is None else True
         use_cached_p = (
             self._qp_internal and
             isinstance(self._system, AffineTimeInvariant))
@@ -668,21 +668,32 @@ class Mpc:
         assert self._qp_internal is not None  # Make mypy happy
         p = self._qp_internal.p
         q = self._qp_internal.q
-
-        prob = osqp.OSQP()
         a = self._qp_constraint.a
         lb = self._qp_constraint.lb
         ub = self._qp_constraint.ub
-        kwargs = dict(max_iter=max_iter,
-                      eps_abs=eps_abs,
-                      eps_rel=eps_rel)
-        kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
-        prob.setup(p, q, a, lb, ub,
-                   warm_starting=warm_start, verbose=False,
-                   **kwargs)
-        if warm_start:
-            prob.warm_start(np.asarray(control_ref).reshape(-1))
-        res = prob.solve(raise_error=False)
+
+        if self._osqp is None or not use_cached_p or not use_cached_a:
+            if self._osqp is None:
+                self._osqp = osqp.OSQP()
+            kwargs = dict(max_iter=max_iter,
+                          eps_abs=eps_abs,
+                          eps_rel=eps_rel)
+            kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
+            self._osqp.setup(p, q, a, lb, ub,
+                             warm_starting=True, verbose=False,
+                             **kwargs)
+        else:
+            self._osqp.update(q=q, l=lb, u=ub)
+            if max_iter is not None:
+                self._osqp.update_settings(max_iter=max_iter)
+            if eps_abs is not None:
+                self._osqp.update_settings(eps_abs=eps_abs)
+            if eps_rel is not None:
+                self._osqp.update_settings(eps_rel=eps_rel)
+
+        if control_ref is not None:
+            self._osqp.warm_start(x=np.asarray(control_ref).reshape(-1))
+        res = self._osqp.solve(raise_error=False)
         self._result = res
         if res.info.status == 'solved':
             u = res.x.reshape(self._horizon, self._system.n_control)
