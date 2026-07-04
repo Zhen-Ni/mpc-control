@@ -32,7 +32,7 @@ class _QpInternal:
     c_bar_m_x: np.ndarray       # c_bar @ m_x
     c_bar_m_u: np.ndarray       # c_bar @ m_u
     c_bar_m_d_d: np.ndarray     # c_bar @ m_d @ d
-    p: np.ndarray
+    p: csc_matrix
     q: np.ndarray
 
 
@@ -42,7 +42,7 @@ class _QpConstraint:
     output_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
     control_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
     control_delta_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
-    a: np.ndarray
+    a: csc_matrix
     lb: np.ndarray
     ub: np.ndarray
 
@@ -50,7 +50,7 @@ class _QpConstraint:
     def new(dim: int) -> _QpConstraint:
         return _QpConstraint(False,
                              None, None, None,
-                             np.zeros([0, dim]),
+                             csc_matrix(np.zeros([0, dim])),
                              np.zeros([0]),
                              np.zeros([0]))
 
@@ -243,7 +243,7 @@ class Mpc:
 
     def _build_constraints(self,
                            initial_state: np.ndarray,
-                           initial_control: np.ndarray) -> None:
+                           previous_control: np.ndarray) -> None:
         """Build the constraints in self._qp_internal.
 
         Make sure self._qp_internal is correctly initialized before
@@ -281,7 +281,7 @@ class Mpc:
             d_bar = _build_delta_matrix(self._mpc_dim,
                                         self._system.n_control)
             control_bar = np.zeros([self._mpc_dim])
-            control_bar[:self._system.n_control] = initial_control
+            control_bar[:self._system.n_control] = previous_control
             control_bar = trans @ control_bar
             a = trans @ d_bar
             lb = lb.reshape(-1) + control_bar
@@ -291,14 +291,63 @@ class Mpc:
             ub_list.append(ub)
 
         if a_list:
-            self._qp_constraint.a = np.concatenate(a_list)
+            self._qp_constraint.a = csc_matrix(np.concatenate(a_list))
             self._qp_constraint.lb = np.concatenate(lb_list)
             self._qp_constraint.ub = np.concatenate(ub_list)
         else:
-            self._qp_constraint.a = np.zeros([0, self._mpc_dim])
+            self._qp_constraint.a = csc_matrix(np.zeros([0, self._mpc_dim]))
             self._qp_constraint.lb = np.zeros([0])
             self._qp_constraint.ub = np.zeros([0])
         self._qp_constraint.modified = False
+
+    def _update_constraints(self,
+                            initial_state: np.ndarray,
+                            previous_control: np.ndarray) -> None:
+        """Update the constraint bounds in self._qp_internal.
+
+        This method assumes `self._qp_constraint.modified` is False
+        and the system is AffineTimeInvariant. Only the bounds
+        dependent on `initial_state` and `previous_control` are
+        recalculated.
+
+        """
+        if self._qp_internal is None:
+            raise ValueError('self._qp_internal should be built first')
+
+        lb_list = []
+        ub_list = []
+
+        if self._qp_constraint.control_bound:
+            lb, ub, _ = self._qp_constraint.control_bound
+            # Control bounds do not depend on state or previous control
+            lb_list.append(lb.reshape(-1))
+            ub_list.append(ub.reshape(-1))
+
+        if self._qp_constraint.output_bound:
+            lb, ub, trans = self._qp_constraint.output_bound
+            trans = block_diag(*trans)
+            offset = trans @ (self._qp_internal.c_bar_m_x @ initial_state +
+                              self._qp_internal.c_bar_m_d_d)
+            lb_list.append(lb.reshape(-1) - offset)
+            ub_list.append(ub.reshape(-1) - offset)
+
+        if self._qp_constraint.control_delta_bound:
+            lb, ub, trans = self._qp_constraint.control_delta_bound
+            trans = block_diag(*trans)
+            control_bar = np.zeros([self._mpc_dim])
+            control_bar[:self._system.n_control] = previous_control
+            control_bar = trans @ control_bar
+            lb = lb.reshape(-1) + control_bar
+            ub = ub.reshape(-1) + control_bar
+            lb_list.append(lb)
+            ub_list.append(ub)
+
+        if lb_list:
+            self._qp_constraint.lb = np.concatenate(lb_list)
+            self._qp_constraint.ub = np.concatenate(ub_list)
+        else:
+            self._qp_constraint.lb = np.zeros([0])
+            self._qp_constraint.ub = np.zeros([0])
 
     def _assemble_linear_qp_helper(
             self,
@@ -404,7 +453,7 @@ class Mpc:
     def _build_qp(self,
                   target_output: np.ndarray,
                   initial_state: np.ndarray,
-                  initial_control: np.ndarray,
+                  previous_control: np.ndarray,
                   state_ref: Optional[np.ndarray],
                   control_ref: Optional[np.ndarray]) -> None:
         """Build the standard quadratic programming problem.
@@ -454,7 +503,7 @@ class Mpc:
         Args:
             target_output: Reference output sequence Y_ref.
             initial_state: Initial state x_0.
-            initial_control: The control input in the previous
+            previous_control: The control input in the previous
                 timestep u_{-1}.
             state_ref: Reference state for system linearization.
             control_ref: Reference control for system linearization.
@@ -488,7 +537,7 @@ class Mpc:
         e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
         p = c_bar_m_u.T @ q_bar @ c_bar_m_u
         control_bar = np.zeros(self._mpc_dim)
-        control_bar[:self._system.n_control] = initial_control
+        control_bar[:self._system.n_control] = previous_control
         q = c_bar_m_u.T @ q_bar @ e_y
 
         if self._control_weighting is not None:
@@ -501,7 +550,7 @@ class Mpc:
             r_delta_bar = block_diag(*self._control_delta_weighting)
             d_bar = _build_delta_matrix(n_total_control, n_control)
             control_bar = np.zeros(self._mpc_dim)
-            control_bar[:self._system.n_control] = initial_control
+            control_bar[:self._system.n_control] = previous_control
             p += d_bar.T @ r_delta_bar @ d_bar
             q -= d_bar.T @ r_delta_bar @ control_bar
         else:
@@ -510,12 +559,12 @@ class Mpc:
         self._qp_internal = _QpInternal(
             q_bar, r_bar, r_delta_bar,
             c_bar_m_x, c_bar_m_u, c_bar_m_d_d,
-            p, q)
+            csc_matrix(p), q)
 
     def _update_qp(self,
                    target_output: np.ndarray,
                    initial_state: np.ndarray,
-                   initial_control: np.ndarray,
+                   previous_control: np.ndarray,
                    ) -> None:
         """Update the qp problem with minimal effort.
 
@@ -544,7 +593,7 @@ class Mpc:
             # To satisfy mypy
             assert r_delta_bar is not None
             control_bar = np.zeros(self._mpc_dim)
-            control_bar[:self._system.n_control] = initial_control
+            control_bar[:self._system.n_control] = previous_control
             q -= d_bar.T @ r_delta_bar @ control_bar
 
         self._qp_internal.q = q
@@ -552,7 +601,7 @@ class Mpc:
     def solve(self,
               target_output: np.ndarray,
               initial_state: np.ndarray,
-              initial_control: Optional[np.ndarray] = None,
+              previous_control: Optional[np.ndarray] = None,
               state_ref: Optional[np.ndarray] = None,
               control_ref: Optional[np.ndarray] = None,
               max_iter: Optional[int] = None,
@@ -563,7 +612,7 @@ class Mpc:
 
         Args:
             initial_state: Initial state (x_0).
-            initial_control: The control input in the previous
+            previous_control: The control input in the previous
             timestep (u_{-1}).
             target_output: Reference output sequence Y_ref. Note that
                 this corresponds to the outputs from step 1 to step N
@@ -587,43 +636,48 @@ class Mpc:
 
         """
         warm_start = False if control_ref is None else True
-        use_cached = (self._qp_internal and
-                      isinstance(self._system, AffineTimeInvariant))
+        use_cached_p = (
+            self._qp_internal and
+            isinstance(self._system, AffineTimeInvariant))
+        use_cached_a = (
+            (not self._qp_constraint.modified) and
+            isinstance(self._system, AffineTimeInvariant))
 
-        if initial_control is None:
+        if previous_control is None:
             if (self._control_delta_weighting is None and
                     self._qp_constraint.control_delta_bound is None):
-                initial_control = np.empty(self._system.n_control)
+                previous_control = np.empty(self._system.n_control)
             else:
                 raise ValueError(
-                    'initial_control must be provided if '
+                    'previous_control must be provided if '
                     'control changing rate is involved.')
 
-        if use_cached:
+        if use_cached_p:
             self._update_qp(target_output,
-                            initial_state, initial_control)
+                            initial_state, previous_control)
         else:
             self._build_qp(target_output,
-                           initial_state, initial_control,
+                           initial_state, previous_control,
                            state_ref, control_ref)
 
-        self._build_constraints(initial_state, initial_control)
+        if use_cached_a:
+            self._update_constraints(initial_state, previous_control)
+        else:
+            self._build_constraints(initial_state, previous_control)
 
         assert self._qp_internal is not None  # Make mypy happy
         p = self._qp_internal.p
         q = self._qp_internal.q
 
-        p_sparse = csc_matrix(p)
-
         prob = osqp.OSQP()
-        a = csc_matrix(self._qp_constraint.a)
+        a = self._qp_constraint.a
         lb = self._qp_constraint.lb
         ub = self._qp_constraint.ub
         kwargs = dict(max_iter=max_iter,
                       eps_abs=eps_abs,
                       eps_rel=eps_rel)
         kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
-        prob.setup(p_sparse, q, a, lb, ub,
+        prob.setup(p, q, a, lb, ub,
                    warm_starting=warm_start, verbose=False,
                    **kwargs)
         if warm_start:
