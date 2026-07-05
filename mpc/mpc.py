@@ -5,7 +5,7 @@ from typing import Optional
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.linalg import block_diag
+import scipy.sparse as sparse
 from scipy.sparse import csc_matrix
 
 import osqp
@@ -13,35 +13,45 @@ import osqp
 from .discrete import Discrete, AffineTimeInvariant
 
 
-def _build_delta_matrix(qp_dim, n_control) -> np.ndarray:
+def _build_csc_delta_matrix(qp_dim: int, n_control: int) -> csc_matrix:
     """
     Build the matrix to transfer control input to delta input.
 
-    Return D_bar s.t. ΔU = D_bar * U
+    Return a sparse version of D_bar s.t. ΔU = D_bar * U
     """
-    d = np.eye(qp_dim)
-    dif = np.eye(qp_dim, qp_dim, -n_control)
-    return d - dif
+    d = np.ones(qp_dim)
+    diff = -np.ones(qp_dim - n_control)
+    csc_d = sparse.diags(diagonals=[d, diff],
+                         offsets=[0, -n_control],
+                         shape=(qp_dim, qp_dim),
+                         format="csc"
+                         )
+    return csc_d
 
 
 @dataclass
 class _QpInternal:
-    q_bar: np.ndarray
-    r_bar: Optional[np.ndarray]
-    r_delta_bar: Optional[np.ndarray]
-    c_bar_m_x: np.ndarray       # c_bar @ m_x
-    c_bar_m_u: np.ndarray       # c_bar @ m_u
-    c_bar_m_d_d: np.ndarray     # c_bar @ m_d @ d
-    p: csc_matrix
+    c_bar_m_x: np.ndarray         # c_bar @ m_x
+    c_bar_m_u: np.ndarray         # c_bar @ m_u
+    c_bar_m_d_d: np.ndarray       # c_bar @ m_d @ d
+    c_bar_m_u_t_q_bar: np.ndarray  # c_bar_m_u.T @ q_bar
+    csc_p: csc_matrix
     q: np.ndarray
 
 
 @dataclass
 class _QpConstraint:
     modified: bool
-    output_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
-    control_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
-    control_delta_bound: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]
+    output_bound: Optional[tuple[np.ndarray,
+                                 np.ndarray,
+                                 csc_matrix]]
+    control_bound: Optional[tuple[np.ndarray,
+                                  np.ndarray,
+                                  csc_matrix]]
+    control_delta_bound: Optional[tuple[np.ndarray,
+                                        np.ndarray,
+                                        csc_matrix]]
+    control_delta_csc_a: Optional[csc_matrix]
     a: csc_matrix
     lb: np.ndarray
     ub: np.ndarray
@@ -50,6 +60,7 @@ class _QpConstraint:
     def new(dim: int) -> _QpConstraint:
         return _QpConstraint(False,
                              None, None, None,
+                             None,
                              csc_matrix(np.zeros([0, dim])),
                              np.zeros([0]),
                              np.zeros([0]))
@@ -92,39 +103,58 @@ class Mpc:
         """
         self._system = system
         self._horizon = horizon
+        self._mpc_dim = self._horizon * self._system.n_control
+        n_output = self._system.n_output
+        n_control = self._system.n_control
+
+        if output_weighting.shape != (self._horizon, n_output, n_output):
+            raise ValueError(
+                'shape of `output_weighting` should be '
+                f'{(self._horizon, n_output, n_output)}, got '
+                f'{output_weighting.shape}')
+        if (control_weighting is not None) and \
+           (control_weighting.shape !=
+                (self._horizon, n_control, n_control)):
+            raise ValueError(
+                'shape of `control_weighting` should be '
+                f'{(self._horizon, n_control, n_control)}, got '
+                f'{control_weighting.shape}')
+        if (control_delta_weighting is not None) and \
+           (control_delta_weighting.shape !=
+                (self._horizon, n_control, n_control)):
+            raise ValueError(
+                'shape of `control_delta_weighting` should be '
+                f'{(self._horizon, n_control, n_control)}, got '
+                f'{control_delta_weighting.shape}')
+
         self._output_weighting = output_weighting
         self._control_weighting = control_weighting
         self._control_delta_weighting = control_delta_weighting
-        self._mpc_dim = self._horizon * self._system.n_control
+        self._csc_output_weighting = sparse.block_diag(
+            output_weighting, format='csc')
+        if self._control_weighting is None:
+            self._csc_control_weighting = None
+        else:
+            self._csc_control_weighting = sparse.block_diag(
+                control_weighting, format='csc')
+        self._csc_d_bar = _build_csc_delta_matrix(self._mpc_dim,
+                                                  self._system.n_control)
+        if self._control_delta_weighting is None:
+            self._csc_d_bar_t_r_delta_bar = None
+            self._csc_control_delta_p = None
+        else:
+            csc_control_delta_weighting = sparse.block_diag(
+                control_delta_weighting, format='csc')
+            self._csc_d_bar_t_r_delta_bar = self._csc_d_bar.T @ \
+                csc_control_delta_weighting
+            self._csc_control_delta_p = self._csc_d_bar_t_r_delta_bar @ \
+                self._csc_d_bar
 
         self._qp_internal: Optional[_QpInternal] = None
         self._qp_constraint = _QpConstraint.new(self._mpc_dim)
 
         self._result = None
         self._osqp: Optional[osqp.OSQP] = None
-
-        n_output = self._system.n_output
-        n_control = self._system.n_control
-
-        if self._output_weighting.shape != (self._horizon, n_output, n_output):
-            raise ValueError(
-                'shape of `output_weighting` should be '
-                f'{(self._horizon, n_output, n_output)}, got '
-                f'{self._output_weighting.shape}')
-        if (self._control_weighting is not None) and \
-           (self._control_weighting.shape !=
-                (self._horizon, n_control, n_control)):
-            raise ValueError(
-                'shape of `control_weighting` should be '
-                f'{(self._horizon, n_control, n_control)}, got '
-                f'{self._control_weighting.shape}')
-        if (self._control_delta_weighting is not None) and \
-           (self._control_delta_weighting.shape !=
-                (self._horizon, n_control, n_control)):
-            raise ValueError(
-                'shape of `control_delta_weighting` should be '
-                f'{(self._horizon, n_control, n_control)}, got '
-                f'{self._control_delta_weighting.shape}')
 
     @property
     def result(self):
@@ -165,8 +195,9 @@ class Mpc:
             raise ValueError(f'shape of proj should be {
                              (self._horizon, m, n_output)}, got {proj.shape}')
 
+        csc_trans = sparse.block_diag(proj, format='csc')
         self._qp_constraint.modified = True
-        self._qp_constraint.output_bound = lb, ub, proj
+        self._qp_constraint.output_bound = lb, ub, csc_trans
 
     def set_control_limit(self,
                           lb: np.ndarray,
@@ -202,8 +233,9 @@ class Mpc:
             raise ValueError(f'shape of proj should be {
                              (self._horizon, m, n_control)}, got {proj.shape}')
 
+        csc_trans = sparse.block_diag(proj, format='csc')
         self._qp_constraint.modified = True
-        self._qp_constraint.control_bound = lb, ub, proj
+        self._qp_constraint.control_bound = lb, ub, csc_trans
 
     def set_control_rate_limit(self,
                                lb: np.ndarray,
@@ -239,8 +271,11 @@ class Mpc:
             raise ValueError(f'shape of proj should be {
                              (self._horizon, m, n_control)}, got {proj.shape}')
 
+        csc_trans = sparse.block_diag(proj, format='csc')
+        control_delta_csc_a = csc_trans @ self._csc_d_bar
         self._qp_constraint.modified = True
-        self._qp_constraint.control_delta_bound = lb, ub, proj
+        self._qp_constraint.control_delta_bound = lb, ub, csc_trans
+        self._qp_constraint.control_delta_csc_a = control_delta_csc_a
 
     def _build_constraints(self,
                            initial_state: np.ndarray,
@@ -257,42 +292,36 @@ class Mpc:
         lb_list = []
         ub_list = []
         if self._qp_constraint.control_bound:
-            lb, ub, trans = self._qp_constraint.control_bound
-            trans = block_diag(*trans)
-            a = trans
+            lb, ub, csc_trans = self._qp_constraint.control_bound
+            a = csc_trans
             lb_list.append(lb.reshape(-1))
             ub_list.append(ub.reshape(-1))
             a_list.append(a)
 
         if self._qp_constraint.output_bound:
-            lb, ub, trans = self._qp_constraint.output_bound
-            trans = block_diag(*trans)
-            a = trans @ self._qp_internal.c_bar_m_u
-            offset = trans @ (self._qp_internal.c_bar_m_x @ initial_state +
-                              self._qp_internal.c_bar_m_d_d)
+            lb, ub, csc_trans = self._qp_constraint.output_bound
+            a = csc_trans @ self._qp_internal.c_bar_m_u
+            offset = csc_trans @ (self._qp_internal.c_bar_m_x @ initial_state +
+                                  self._qp_internal.c_bar_m_d_d)
             lb = lb.reshape(-1) - offset
             ub = ub.reshape(-1) - offset
-            a_list.append(a)
+            a_list.append(csc_matrix(a))
             lb_list.append(lb)
             ub_list.append(ub)
 
         if self._qp_constraint.control_delta_bound:
-            lb, ub, trans = self._qp_constraint.control_delta_bound
-            trans = block_diag(*trans)
-            d_bar = _build_delta_matrix(self._mpc_dim,
-                                        self._system.n_control)
-            control_bar = np.zeros([self._mpc_dim])
-            control_bar[:self._system.n_control] = previous_control
-            control_bar = trans @ control_bar
-            a = trans @ d_bar
-            lb = lb.reshape(-1) + control_bar
-            ub = ub.reshape(-1) + control_bar
+            lb, ub, csc_trans = self._qp_constraint.control_delta_bound
+            control_offset = csc_trans[:, :self._system.n_control] @ \
+                previous_control
+            a = self._qp_constraint.control_delta_csc_a
+            lb = lb.reshape(-1) + control_offset
+            ub = ub.reshape(-1) + control_offset
             a_list.append(a)
             lb_list.append(lb)
             ub_list.append(ub)
 
         if a_list:
-            self._qp_constraint.a = csc_matrix(np.concatenate(a_list))
+            self._qp_constraint.a = sparse.vstack(a_list, format='csc')
             self._qp_constraint.lb = np.concatenate(lb_list)
             self._qp_constraint.ub = np.concatenate(ub_list)
         else:
@@ -325,21 +354,18 @@ class Mpc:
             ub_list.append(ub.reshape(-1))
 
         if self._qp_constraint.output_bound:
-            lb, ub, trans = self._qp_constraint.output_bound
-            trans = block_diag(*trans)
-            offset = trans @ (self._qp_internal.c_bar_m_x @ initial_state +
-                              self._qp_internal.c_bar_m_d_d)
+            lb, ub, csc_trans = self._qp_constraint.output_bound
+            offset = csc_trans @ (self._qp_internal.c_bar_m_x @ initial_state +
+                                  self._qp_internal.c_bar_m_d_d)
             lb_list.append(lb.reshape(-1) - offset)
             ub_list.append(ub.reshape(-1) - offset)
 
         if self._qp_constraint.control_delta_bound:
-            lb, ub, trans = self._qp_constraint.control_delta_bound
-            trans = block_diag(*trans)
-            control_bar = np.zeros([self._mpc_dim])
-            control_bar[:self._system.n_control] = previous_control
-            control_bar = trans @ control_bar
-            lb = lb.reshape(-1) + control_bar
-            ub = ub.reshape(-1) + control_bar
+            lb, ub, csc_trans = self._qp_constraint.control_delta_bound
+            control_offset = csc_trans[:, :self._system.n_control] @ \
+                previous_control
+            lb = lb.reshape(-1) + control_offset
+            ub = ub.reshape(-1) + control_offset
             lb_list.append(lb)
             ub_list.append(ub)
 
@@ -515,7 +541,6 @@ class Mpc:
         n_output = self._system.n_output
 
         n_total_output = self._horizon * n_output
-        n_total_control = self._mpc_dim
 
         # Build M_x, M_u, C_bar
         c_bar_m_x = np.zeros([n_total_output, n_state])
@@ -531,36 +556,31 @@ class Mpc:
                 c_bar_m_x, c_bar_m_u, c_bar_m_d_d)
 
         # Build internal matrixes
-        q_bar = block_diag(*self._output_weighting)
+        csc_q_bar = self._csc_output_weighting
 
         # Calculate P and q for output (y).
         y_ref_vec = target_output.reshape(-1)
         e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
-        p = c_bar_m_u.T @ q_bar @ c_bar_m_u
-        control_bar = np.zeros(self._mpc_dim)
-        control_bar[:self._system.n_control] = previous_control
-        q = c_bar_m_u.T @ q_bar @ e_y
+        c_bar_m_u_t_q_bar = c_bar_m_u.T @ csc_q_bar
+        p = c_bar_m_u_t_q_bar @ c_bar_m_u
+        q = c_bar_m_u_t_q_bar @ e_y
 
         if self._control_weighting is not None:
-            r_bar = block_diag(*self._control_weighting)
-            p += r_bar
+            csc_r_bar = self._csc_control_weighting
+            p += csc_r_bar
         else:
-            r_bar = None
+            csc_r_bar = None
 
         if self._control_delta_weighting is not None:
-            r_delta_bar = block_diag(*self._control_delta_weighting)
-            d_bar = _build_delta_matrix(n_total_control, n_control)
-            control_bar = np.zeros(self._mpc_dim)
-            control_bar[:self._system.n_control] = previous_control
-            p += d_bar.T @ r_delta_bar @ d_bar
-            q -= d_bar.T @ r_delta_bar @ control_bar
-        else:
-            r_delta_bar = None
+            csc_d_bar_t_r_delta_bar = self._csc_d_bar_t_r_delta_bar
+            # To satisfy mypy
+            assert csc_d_bar_t_r_delta_bar is not None
+            p += self._csc_control_delta_p
+            q -= csc_d_bar_t_r_delta_bar[:, :n_control] @ previous_control
 
         self._qp_internal = _QpInternal(
-            q_bar, r_bar, r_delta_bar,
-            c_bar_m_x, c_bar_m_u, c_bar_m_d_d,
-            csc_matrix(p), q)
+            c_bar_m_x, c_bar_m_u, c_bar_m_d_d, c_bar_m_u_t_q_bar,
+            csc_matrix(p), q, )
 
     def _update_qp(self,
                    target_output: np.ndarray,
@@ -578,24 +598,22 @@ class Mpc:
             raise ValueError(
                 '`_update_qp` can only be called after the '
                 'problem is built by `_build_qp`')
+
         c_bar_m_x = self._qp_internal.c_bar_m_x
-        c_bar_m_u = self._qp_internal.c_bar_m_u
         c_bar_m_d_d = self._qp_internal.c_bar_m_d_d
-        q_bar = self._qp_internal.q_bar
+        c_bar_m_u_t_q_bar = self._qp_internal.c_bar_m_u_t_q_bar
         y_ref_vec = target_output.reshape(-1)
 
         e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
-        q = c_bar_m_u.T @ q_bar @ e_y
+        q = c_bar_m_u_t_q_bar @ e_y
 
         if self._control_delta_weighting is not None:
-            d_bar = _build_delta_matrix(self._mpc_dim,
-                                        self._system.n_control)
-            r_delta_bar = self._qp_internal.r_delta_bar
+            n_control = self._system.n_control
+            csc_d_bar_t_r_delta_bar = self._csc_d_bar_t_r_delta_bar
             # To satisfy mypy
-            assert r_delta_bar is not None
-            control_bar = np.zeros(self._mpc_dim)
-            control_bar[:self._system.n_control] = previous_control
-            q -= d_bar.T @ r_delta_bar @ control_bar
+            assert csc_d_bar_t_r_delta_bar is not None
+            q -= csc_d_bar_t_r_delta_bar[:, :n_control] @ \
+                previous_control
 
         self._qp_internal.q = q
 
@@ -646,6 +664,7 @@ class Mpc:
         if previous_control is None:
             if (self._control_delta_weighting is None and
                     self._qp_constraint.control_delta_bound is None):
+                # Set to empty because it will not be used anyway.
                 previous_control = np.empty(self._system.n_control)
             else:
                 raise ValueError(
@@ -666,7 +685,7 @@ class Mpc:
             self._build_constraints(initial_state, previous_control)
 
         assert self._qp_internal is not None  # Make mypy happy
-        p = self._qp_internal.p
+        p = self._qp_internal.csc_p
         q = self._qp_internal.q
         a = self._qp_constraint.a
         lb = self._qp_constraint.lb
