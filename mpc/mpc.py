@@ -6,14 +6,33 @@ from dataclasses import dataclass
 
 import numpy as np
 import scipy.sparse as sparse
-from scipy.sparse import csc_matrix
+from scipy.sparse import csc_array
 
 import osqp
 
 from .discrete import Discrete, AffineTimeInvariant
 
 
-def _build_csc_delta_matrix(qp_dim: int, n_control: int) -> csc_matrix:
+def block_diag(arrays, format):
+    """Build a block diagonal sparse array from provided arrays.
+
+    This is a protocol for scipy.sparse.block_diag, as the scipy's
+    version would be confused and provide warnings if arrays are all
+    dense.
+
+    This function can be deprecated when scipy sparse array interfaces
+    are stable. (No warnings will be printed then)
+    """
+    array_list = []
+    for i, a in enumerate(arrays):
+        if i == 0:
+            array_list.append(csc_array(a))
+        else:
+            array_list.append(a)
+    return sparse.block_diag(array_list, format=format)
+
+
+def _build_csc_delta_matrix(qp_dim: int, n_control: int) -> csc_array:
     """
     Build the matrix to transfer control input to delta input.
 
@@ -35,7 +54,7 @@ class _QpInternal:
     c_bar_m_u: np.ndarray         # c_bar @ m_u
     c_bar_m_d_d: np.ndarray       # c_bar @ m_d @ d
     c_bar_m_u_t_q_bar: np.ndarray  # c_bar_m_u.T @ q_bar
-    csc_p: csc_matrix
+    csc_p: csc_array
     q: np.ndarray
 
 
@@ -44,15 +63,15 @@ class _QpConstraint:
     modified: bool
     output_bound: Optional[tuple[np.ndarray,
                                  np.ndarray,
-                                 csc_matrix]]
+                                 csc_array]]
     control_bound: Optional[tuple[np.ndarray,
                                   np.ndarray,
-                                  csc_matrix]]
+                                  csc_array]]
     control_delta_bound: Optional[tuple[np.ndarray,
                                         np.ndarray,
-                                        csc_matrix]]
-    control_delta_csc_a: Optional[csc_matrix]
-    a: csc_matrix
+                                        csc_array]]
+    control_delta_csc_a: Optional[csc_array]
+    a: csc_array
     lb: np.ndarray
     ub: np.ndarray
 
@@ -61,7 +80,7 @@ class _QpConstraint:
         return _QpConstraint(False,
                              None, None, None,
                              None,
-                             csc_matrix(np.zeros([0, dim])),
+                             csc_array(np.zeros([0, dim])),
                              np.zeros([0]),
                              np.zeros([0]))
 
@@ -130,12 +149,12 @@ class Mpc:
         self._output_weighting = output_weighting
         self._control_weighting = control_weighting
         self._control_delta_weighting = control_delta_weighting
-        self._csc_output_weighting = sparse.block_diag(
+        self._csc_output_weighting = block_diag(
             output_weighting, format='csc')
         if self._control_weighting is None:
             self._csc_control_weighting = None
         else:
-            self._csc_control_weighting = sparse.block_diag(
+            self._csc_control_weighting = block_diag(
                 control_weighting, format='csc')
         self._csc_d_bar = _build_csc_delta_matrix(self._mpc_dim,
                                                   self._system.n_control)
@@ -143,7 +162,7 @@ class Mpc:
             self._csc_d_bar_t_r_delta_bar = None
             self._csc_control_delta_p = None
         else:
-            csc_control_delta_weighting = sparse.block_diag(
+            csc_control_delta_weighting = block_diag(
                 control_delta_weighting, format='csc')
             self._csc_d_bar_t_r_delta_bar = self._csc_d_bar.T @ \
                 csc_control_delta_weighting
@@ -195,7 +214,7 @@ class Mpc:
             raise ValueError(f'shape of proj should be {
                              (self._horizon, m, n_output)}, got {proj.shape}')
 
-        csc_trans = sparse.block_diag(proj, format='csc')
+        csc_trans = block_diag(proj, format='csc')
         self._qp_constraint.modified = True
         self._qp_constraint.output_bound = lb, ub, csc_trans
 
@@ -233,7 +252,7 @@ class Mpc:
             raise ValueError(f'shape of proj should be {
                              (self._horizon, m, n_control)}, got {proj.shape}')
 
-        csc_trans = sparse.block_diag(proj, format='csc')
+        csc_trans = block_diag(proj, format='csc')
         self._qp_constraint.modified = True
         self._qp_constraint.control_bound = lb, ub, csc_trans
 
@@ -271,7 +290,7 @@ class Mpc:
             raise ValueError(f'shape of proj should be {
                              (self._horizon, m, n_control)}, got {proj.shape}')
 
-        csc_trans = sparse.block_diag(proj, format='csc')
+        csc_trans = block_diag(proj, format='csc')
         control_delta_csc_a = csc_trans @ self._csc_d_bar
         self._qp_constraint.modified = True
         self._qp_constraint.control_delta_bound = lb, ub, csc_trans
@@ -305,7 +324,7 @@ class Mpc:
                                   self._qp_internal.c_bar_m_d_d)
             lb = lb.reshape(-1) - offset
             ub = ub.reshape(-1) - offset
-            a_list.append(csc_matrix(a))
+            a_list.append(csc_array(a))
             lb_list.append(lb)
             ub_list.append(ub)
 
@@ -325,7 +344,7 @@ class Mpc:
             self._qp_constraint.lb = np.concatenate(lb_list)
             self._qp_constraint.ub = np.concatenate(ub_list)
         else:
-            self._qp_constraint.a = csc_matrix(np.zeros([0, self._mpc_dim]))
+            self._qp_constraint.a = csc_array(np.zeros([0, self._mpc_dim]))
             self._qp_constraint.lb = np.zeros([0])
             self._qp_constraint.ub = np.zeros([0])
         self._qp_constraint.modified = False
@@ -580,7 +599,7 @@ class Mpc:
 
         self._qp_internal = _QpInternal(
             c_bar_m_x, c_bar_m_u, c_bar_m_d_d, c_bar_m_u_t_q_bar,
-            csc_matrix(p), q, )
+            csc_array(p), q, )
 
     def _update_qp(self,
                    target_output: np.ndarray,
