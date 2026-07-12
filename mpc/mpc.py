@@ -123,14 +123,46 @@ class Mpc:
         self._system = system
         self._horizon = horizon
         self._mpc_dim = self._horizon * self._system.n_control
-        n_output = self._system.n_output
-        n_control = self._system.n_control
 
+        # Type declarations for internal variables
+        self._output_weighting: np.ndarray
+        self._control_weighting: Optional[np.ndarray]
+        self._control_delta_weighting: Optional[np.ndarray]
+        self._csc_output_weighting: csc_array
+        self._csc_control_weighting: Optional[csc_array]
+        self._csc_d_bar_t_r_delta_bar: Optional[csc_array]
+        self._csc_control_delta_p: Optional[csc_array]
+
+        self._csc_d_bar = _build_csc_delta_matrix(self._mpc_dim,
+                                                  self._system.n_control)
+        self._qp_internal: Optional[_QpInternal] = None
+        self._qp_constraint = _QpConstraint.new(self._mpc_dim)
+
+        self._result = None
+        self._osqp: Optional[osqp.OSQP] = None
+
+        self.set_output_weighting(output_weighting)
+        self.set_control_weighting(control_weighting)
+        self.set_control_delta_weighting(control_delta_weighting)
+
+    def set_output_weighting(self, output_weighting: np.ndarray) -> None:
+        """Set the output weighting matrix."""
+        n_output = self._system.n_output
         if output_weighting.shape != (self._horizon, n_output, n_output):
             raise ValueError(
                 'shape of `output_weighting` should be '
                 f'{(self._horizon, n_output, n_output)}, got '
                 f'{output_weighting.shape}')
+        self._output_weighting = output_weighting
+        self._csc_output_weighting = block_diag(
+            output_weighting, format='csc')
+        # Invalidate the cached QP matrices to force rebuild in next solve()
+        self._qp_internal = None
+
+    def set_control_weighting(
+            self, control_weighting: Optional[np.ndarray] = None) -> None:
+        """Set the control weighting matrix."""
+        n_control = self._system.n_control
         if (control_weighting is not None) and \
            (control_weighting.shape !=
                 (self._horizon, n_control, n_control)):
@@ -138,6 +170,19 @@ class Mpc:
                 'shape of `control_weighting` should be '
                 f'{(self._horizon, n_control, n_control)}, got '
                 f'{control_weighting.shape}')
+        self._control_weighting = control_weighting
+        if control_weighting is None:
+            self._csc_control_weighting = None
+        else:
+            self._csc_control_weighting = block_diag(
+                control_weighting, format='csc')
+        self._qp_internal = None
+
+    def set_control_delta_weighting(
+            self,
+            control_delta_weighting: Optional[np.ndarray] = None) -> None:
+        """Set the control delta weighting matrix."""
+        n_control = self._system.n_control
         if (control_delta_weighting is not None) and \
            (control_delta_weighting.shape !=
                 (self._horizon, n_control, n_control)):
@@ -145,20 +190,8 @@ class Mpc:
                 'shape of `control_delta_weighting` should be '
                 f'{(self._horizon, n_control, n_control)}, got '
                 f'{control_delta_weighting.shape}')
-
-        self._output_weighting = output_weighting
-        self._control_weighting = control_weighting
         self._control_delta_weighting = control_delta_weighting
-        self._csc_output_weighting = block_diag(
-            output_weighting, format='csc')
-        if self._control_weighting is None:
-            self._csc_control_weighting = None
-        else:
-            self._csc_control_weighting = block_diag(
-                control_weighting, format='csc')
-        self._csc_d_bar = _build_csc_delta_matrix(self._mpc_dim,
-                                                  self._system.n_control)
-        if self._control_delta_weighting is None:
+        if control_delta_weighting is None:
             self._csc_d_bar_t_r_delta_bar = None
             self._csc_control_delta_p = None
         else:
@@ -168,12 +201,7 @@ class Mpc:
                 csc_control_delta_weighting
             self._csc_control_delta_p = self._csc_d_bar_t_r_delta_bar @ \
                 self._csc_d_bar
-
-        self._qp_internal: Optional[_QpInternal] = None
-        self._qp_constraint = _QpConstraint.new(self._mpc_dim)
-
-        self._result = None
-        self._osqp: Optional[osqp.OSQP] = None
+        self._qp_internal = None
 
     @property
     def result(self):
