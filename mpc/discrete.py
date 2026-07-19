@@ -233,7 +233,6 @@ class AffineTimeInvariant(Discrete):
         return self.output_matrix
 
 
-@final
 class AtiSystem(AffineTimeInvariant):
     """Affine time invariant system.
 
@@ -310,7 +309,6 @@ class AtiSystem(AffineTimeInvariant):
         return self._c
 
 
-@final
 class LtiSystem(AffineTimeInvariant):
     """
     Discrete Linear Time-Invariant System.
@@ -385,7 +383,6 @@ class LtiSystem(AffineTimeInvariant):
         return self._c
 
 
-@final
 class HomogeneousSystem(Discrete):
     """
     Discrete non-linear homogeneous system.
@@ -489,7 +486,6 @@ class HomogeneousSystem(Discrete):
         return self._c(state)
 
 
-@final
 class NonlinearSystem(Discrete):
     """
     Discrete non-linear System.
