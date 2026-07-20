@@ -2,4 +2,4 @@
 
 from .mpc import Mpc
 from .discrete import LtiSystem, AtiSystem, HomogeneousSystem, NonlinearSystem
-from .rls import SupportRls
+from .rls import Rls

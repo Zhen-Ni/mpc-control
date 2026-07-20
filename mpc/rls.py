@@ -7,9 +7,8 @@ from scipy import linalg
 from . import discrete
 
 
-class SupportRls(discrete.Discrete):
-    r"""Mixin class for systems supporting Recursive Least Squares
-    (RLS).
+class Rls(abc.ABC):
+    r"""Solver class for Recursive Least Squares (RLS).
 
     This class provides the RLS algorithm for online parameter
     identification. It assumes the system can be formulated such that
@@ -33,6 +32,7 @@ class SupportRls(discrete.Discrete):
     n_error is the dimension of the error vector e.
     P is the covariance matrix of shape (n_parameter, n_parameter).
     \Phi is the coefficient matrix of shape (n_parameter, n_error).
+
     """
 
     @abc.abstractmethod
@@ -69,22 +69,31 @@ class SupportRls(discrete.Discrete):
         """
         ...
 
-    def __init__(self, delta: float):
+    def __init__(self, system: discrete.Discrete, delta: float):
         """Initialize the RLS solver.
 
         Args:
+            system: The discrete system to be identified.
             delta: The initial scaling factor for the covariance matrix P.
-                P is initialized as `delta * I`, where I is the identity
-                matrix of shape (n_parameter, n_parameter). A larger
-                value makes the algorithm more responsive to initial
-                errors, leading to faster initial convergence but
-                potentially more oscillation. A smaller value results
-                in slower convergence and relies more heavily on the
-                initial parameter guess. Typical values are large
-                (e.g., 100, 1000) when the initial guess is poor.
+                P will be initialized as `delta * I`, where I is the
+                identity matrix of shape (n_parameter, n_parameter). A
+                larger value makes the algorithm more responsive to
+                initial errors, leading to faster initial convergence
+                but potentially more oscillation. A smaller value
+                results in slower convergence and relies more heavily
+                on the initial parameter guess. Typical values are
+                large (e.g., 100, 1000) when the initial guess is
+                poor.
+
         """
-        self._n_parameter = len(self.get_parameter())
-        self._p = np.eye(self._n_parameter) * delta
+        self._system = system
+        self._delta = delta
+        self._p: Optional[np.ndarray] = None
+
+    @property
+    def system(self) -> discrete.Discrete:
+        """The target system instance to be identified."""
+        return self._system
 
     def update(self,
                error: np.ndarray,
@@ -115,10 +124,11 @@ class SupportRls(discrete.Discrete):
         """
         theta = self.get_parameter()
         phi = self.get_coefficient(state, control)
+        p = np.eye(len(theta)) * self._delta if self._p is None else self._p
 
         # 1. Calculate the gain matrix K (phi dim: n x m, error dim: m x 1)
         m = phi.shape[1]
-        P_phi = self._p @ phi
+        P_phi = p @ phi
         # The matrix S = lambda*I + Phi^T*P*Phi is symmetric positive
         # definite.  Using solve with assume_a='pos' exploits this.
         # This is equivalent to: ```K = P_phi @
@@ -131,7 +141,7 @@ class SupportRls(discrete.Discrete):
         self.set_parameter(theta - K @ error)
 
         # 3. Update covariance matrix P
-        # Since P is symmetric, phi.T @ self._p is equivalent to P_phi.T
-        self._p = (self._p - K @ P_phi.T) / forgetting_factor
+        # Since P is symmetric, phi.T @ p is equivalent to P_phi.T
+        p = (p - K @ P_phi.T) / forgetting_factor
         # Enforce symmetry to avoid numerical drift
-        self._p = (self._p + self._p.T) / 2.0
+        self._p = (p + p.T) / 2.0

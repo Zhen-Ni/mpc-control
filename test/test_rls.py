@@ -5,14 +5,13 @@ import numpy as np
 import mpc
 
 
-class FirstOrder(mpc.LtiSystem, mpc.SupportRls):
-    def __init__(self, tau, delta):
-        A = np.array([[1-tau]])
-        B = np.array([[tau]])
-        C = np.array([[1.]])
-        self._parameter = np.array([tau], dtype=float)
-        mpc.LtiSystem.__init__(self, A, B, C)
-        mpc.SupportRls.__init__(self, delta)
+class FirstOrderRls(mpc.Rls):
+    def __init__(self,
+                 system: mpc.LtiSystem,
+                 delta: float,
+                 initial_tau: float):
+        self._parameter = np.array([initial_tau], dtype=float)
+        super().__init__(system, delta)
 
     def get_coefficient(self, state, control):
         result = np.array([[(-state[0] + control[0])]])
@@ -24,21 +23,17 @@ class FirstOrder(mpc.LtiSystem, mpc.SupportRls):
     def set_parameter(self, parameters):
         self._parameter[:] = parameters
         tau = parameters[0]
-        self.transition_matrix[0, 0] = 1 - tau
-        self.control_matrix[0, 0] = tau  # type: ignore[misc]
+        self._system.transition_matrix[0, 0] = 1 - tau
+        self._system.control_matrix[0, 0] = tau
 
 
-class MultipleParameters(mpc.LtiSystem, mpc.SupportRls):
-    def __init__(self, k1, k2, k3, delta):
-        A = np.array([[k1, k2],
-                      [0, 1-k3]])
-        B = np.array([[0],
-                      [k3]])
-        C = np.array([[1., 0.],
-                      [0., 1.]])
-        self._parameter = np.array([k1, k2, k3], dtype=float)
-        mpc.LtiSystem.__init__(self, A, B, C)
-        mpc.SupportRls.__init__(self, delta)
+class MultipleParametersRls(mpc.Rls):
+    def __init__(self,
+                 system: mpc.LtiSystem,
+                 delta: float,
+                 initial_params: np.ndarray):
+        self._parameter = initial_params.copy()
+        super().__init__(system, delta)
 
     def get_coefficient(self, state, control):
         x0, x1 = state
@@ -53,23 +48,19 @@ class MultipleParameters(mpc.LtiSystem, mpc.SupportRls):
     def set_parameter(self, parameters):
         self._parameter[:] = parameters
         k1, k2, k3 = parameters
-        self.transition_matrix[:] = np.array([[k1, k2],
-                                              [0, 1-k3]])
-        self.control_matrix[:] = np.array([[0],
-                                           [k3]])
+        self._system.transition_matrix[:] = np.array([[k1, k2],
+                                                      [0, 1-k3]])
+        self._system.control_matrix[:] = np.array([[0],
+                                                   [k3]])
 
 
-class NonlinearSystem(mpc.LtiSystem, mpc.SupportRls):
-    def __init__(self, k1, k2, k3, delta):
-        A = np.array([[k1, np.tan(k2)],
-                      [0, 1-k3]])
-        B = np.array([[0],
-                      [k3]])
-        C = np.array([[1., 0.],
-                      [0., 1.]])
-        self._parameter = np.array([k1, k2, k3], dtype=float)
-        mpc.LtiSystem.__init__(self, A, B, C)
-        mpc.SupportRls.__init__(self, delta)
+class NonlinearRls(mpc.Rls):
+    def __init__(self,
+                 system: mpc.LtiSystem,
+                 delta: float,
+                 initial_params: np.ndarray):
+        self._parameter = initial_params.copy()
+        super().__init__(system, delta)
 
     def get_coefficient(self, state, control):
         x0, x1 = state
@@ -85,10 +76,10 @@ class NonlinearSystem(mpc.LtiSystem, mpc.SupportRls):
     def set_parameter(self, parameters):
         self._parameter[:] = parameters
         k1, k2, k3 = parameters
-        self.transition_matrix[:] = np.array([[k1, np.tan(k2)],
-                                              [0, 1-k3]])
-        self.control_matrix[:] = np.array([[0],
-                                           [k3]])
+        self._system.transition_matrix[:] = np.array([[k1, np.tan(k2)],
+                                                      [0, 1-k3]])
+        self._system.control_matrix[:] = np.array([[0],
+                                                   [k3]])
 
 
 class TestRls(unittest.TestCase):
@@ -96,8 +87,15 @@ class TestRls(unittest.TestCase):
         """Test parameter identification of a first-order system."""
         tau = 0.2
         delta = 100
-        s_ref = FirstOrder(tau, delta)
-        s_rls = FirstOrder(0.0, delta)
+        sys_ref = mpc.LtiSystem(
+            transition_matrix=np.array([[1-tau]]),
+            control_matrix=np.array([[tau]]),
+            output_matrix=np.array([[1.]]))
+        sys_rls = mpc.LtiSystem(
+            transition_matrix=np.array([[1.0]]),
+            control_matrix=np.array([[0.0]]),
+            output_matrix=np.array([[1.]]))
+        s_rls = FirstOrderRls(sys_rls, delta, 0.0)
 
         n = 100
         t = 20
@@ -108,10 +106,10 @@ class TestRls(unittest.TestCase):
 
         forgetting_factor = 0.9
         for i, u in enumerate(controls):
-            x_ref = s_ref.get_state(state, u[None])[0]
-            y_ref = s_ref.get_output(x_ref[None])[0]
-            x_rls = s_rls.get_state(state, u[None])[0]
-            y_rls = s_ref.get_output(x_rls[None])[0]
+            x_ref = sys_ref.get_state(state, u[None])[0]
+            y_ref = sys_ref.get_output(x_ref[None])[0]
+            x_rls = sys_rls.get_state(state, u[None])[0]
+            y_rls = sys_ref.get_output(x_rls[None])[0]
             e = y_rls - y_ref
             s_rls.update(e, forgetting_factor, x_ref, u)
             state = x_ref
@@ -123,8 +121,22 @@ class TestRls(unittest.TestCase):
         """Test identification a 2-DOF system with 3 unknown parameters."""
         k1, k2, k3 = 0.9, 1.0, 0.2
         delta = 100
-        s_ref = MultipleParameters(k1, k2, k3, delta)
-        s_rls = MultipleParameters(0.0, 0.0, 0.0, delta)
+        sys_ref = mpc.LtiSystem(
+            transition_matrix=np.array([[k1, k2],
+                                        [0, 1-k3]]),
+            control_matrix=np.array([[0],
+                                     [k3]]),
+            output_matrix=np.array([[1., 0.],
+                                    [0., 1.]]))
+        sys_rls = mpc.LtiSystem(
+            transition_matrix=np.array([[0.0, 0.0],
+                                        [0, 1.0]]),
+            control_matrix=np.array([[0],
+                                     [0.0]]),
+            output_matrix=np.array([[1., 0.],
+                                    [0., 1.]]))
+        s_rls = MultipleParametersRls(
+            sys_rls, delta, np.array([0.0, 0.0, 0.0], dtype=float))
 
         n = 100
         t = 20
@@ -135,10 +147,10 @@ class TestRls(unittest.TestCase):
 
         forgetting_factor = 0.9
         for i, u in enumerate(controls):
-            x_ref = s_ref.get_state(state, u[None])[0]
-            y_ref = s_ref.get_output(x_ref[None])[0]
-            x_rls = s_rls.get_state(state, u[None])[0]
-            y_rls = s_ref.get_output(x_rls[None])[0]
+            x_ref = sys_ref.get_state(state, u[None])[0]
+            y_ref = sys_ref.get_output(x_ref[None])[0]
+            x_rls = sys_rls.get_state(state, u[None])[0]
+            y_rls = sys_ref.get_output(x_rls[None])[0]
             e = y_rls - y_ref
             s_rls.update(e, forgetting_factor, x_ref, u)
             state = x_ref
@@ -152,8 +164,22 @@ class TestRls(unittest.TestCase):
         """Test identification a 2-DOF nonlinear system."""
         k1, k2, k3 = 0.9, 1.5, 0.2
         delta = 100
-        s_ref = NonlinearSystem(k1, k2, k3, delta)
-        s_rls = NonlinearSystem(0.0, 0.0, 0.0, delta)
+        sys_ref = mpc.LtiSystem(
+            transition_matrix=np.array([[k1, np.tan(k2)],
+                                        [0, 1-k3]]),
+            control_matrix=np.array([[0],
+                                     [k3]]),
+            output_matrix=np.array([[1., 0.],
+                                    [0., 1.]]))
+        sys_rls = mpc.LtiSystem(
+            transition_matrix=np.array([[0.0, np.tan(0.0)],
+                                        [0, 1.0]]),
+            control_matrix=np.array([[0],
+                                     [0.0]]),
+            output_matrix=np.array([[1., 0.],
+                                    [0., 1.]]))
+        s_rls = NonlinearRls(
+            sys_rls, delta, np.array([0.0, 0.0, 0.0], dtype=float))
 
         n = 100
         t = 20
@@ -164,10 +190,10 @@ class TestRls(unittest.TestCase):
 
         forgetting_factor = 0.9
         for i, u in enumerate(controls):
-            x_ref = s_ref.get_state(state, u[None])[0]
-            y_ref = s_ref.get_output(x_ref[None])[0]
-            x_rls = s_rls.get_state(state, u[None])[0]
-            y_rls = s_ref.get_output(x_rls[None])[0]
+            x_ref = sys_ref.get_state(state, u[None])[0]
+            y_ref = sys_ref.get_output(x_ref[None])[0]
+            x_rls = sys_rls.get_state(state, u[None])[0]
+            y_rls = sys_ref.get_output(x_rls[None])[0]
             e = y_rls - y_ref
             s_rls.update(e, forgetting_factor, x_ref, u)
             state = x_ref
