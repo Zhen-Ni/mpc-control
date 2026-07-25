@@ -1,0 +1,11 @@
+[project]
+name = "mpc"
+version = "0.1.0"
+description = "A Python library for model predictive control."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+    "osqp>=1.0.0",
+    "scipy>=1.0.0",
+]
