@@ -37,10 +37,8 @@ class Ekf:
     Users can refer to the docstring of these two member funcitons
     for the usage.
 
-    Parameters
-    ----------
-    system: Discrete
-        The discrete-time system model. Can be linear or nonlinear.
+    Attributes:
+        system: The discrete-time system model. Can be linear or nonlinear.
     """
 
     def __init__(self, system: Discrete,
@@ -109,12 +107,9 @@ class Ekf:
         next timestep are predicted by given input
         vector `u` and its uncertainty matrix `q`.
 
-        Parameters
-        ----------
-        u : np.ndarray
-            The input variable (control vector).
-        q : np.ndarray
-            The process noise uncertainty of the current timestep.
+        Args:
+            u: The input variable (control vector).
+            q: The process noise uncertainty of the current timestep.
         """
         # Update the system
         self._linearized = self._system.linearize(self._x, u)
@@ -133,12 +128,9 @@ class Ekf:
         next timestep are updated by given measurement
         vector `z` and its uncertainty matrix `r`.
 
-        Parameters
-        ----------
-        z : np.ndarray
-            The measured output of the system.
-        r : np.ndarray
-            The measurement uncertainty of the current timestep.
+        Args:
+            z: The measured output of the system.
+            r: The measurement uncertainty of the current timestep.
         """
         if self._linearized is None:
             raise RuntimeError('Should call `predict` before updating.')
@@ -180,16 +172,11 @@ class Ukf:
         kalman_filter.predict(u, Q)
         kalman_filter.update(z, R)
 
-    Parameters
-    ----------
-    system: Discrete
-        The discrete-time system model. Can be linear or nonlinear.
-    alpha: float
-        Spread of the sigma points. Typically 1e-3.
-    beta: float
-        Incorporation of prior knowledge. 2 is optimal for Gaussian.
-    kappa: float
-        Secondary scaling parameter. Typically 0.
+    Attributes:
+        system: The discrete-time system model. Can be linear or nonlinear.
+        alpha: Spread of the sigma points. Typically 1e-3.
+        beta: Incorporation of prior knowledge. 2 is optimal for Gaussian.
+        kappa: Secondary scaling parameter. Typically 0.
     """
 
     def __init__(self, system: Discrete,
@@ -297,12 +284,9 @@ class Ukf:
         next timestep are predicted by given input
         vector `u` and its uncertainty matrix `q`.
 
-        Parameters
-        ----------
-        u : np.ndarray
-            The input variable (control vector).
-        q : np.ndarray
-            The process noise uncertainty of the current timestep.
+        Args:
+            u: The input variable (control vector).
+            q: The process noise uncertainty of the current timestep.
         """
         sigmas = self._generate_sigmas()
 
@@ -332,12 +316,9 @@ class Ukf:
         next timestep are updated by given measurement
         vector `z` and its uncertainty matrix `r`.
 
-        Parameters
-        ----------
-        z : np.ndarray
-            The measured output of the system.
-        r : np.ndarray
-            The measurement uncertainty of the current timestep.
+        Args:
+            z: The measured output of the system.
+            r: The measurement uncertainty of the current timestep.
         """
         if self._sigmas_pred is None:
             raise RuntimeError('Should call `predict` before updating.')
