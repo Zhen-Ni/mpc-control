@@ -235,12 +235,13 @@ class Mpc:
 
         if proj is None:
             if m != n_output:
-                raise ValueError(f'proj must be provided if m ({
-                                 m}) != n_output ({n_output})')
+                raise ValueError(f'proj must be provided if m ({m}) '
+                                 f'!= n_output ({n_output})')
             proj = np.stack([np.eye(n_output)] * self._horizon)
         elif proj.shape != (self._horizon, m, n_output):
-            raise ValueError(f'shape of proj should be {
-                             (self._horizon, m, n_output)}, got {proj.shape}')
+            raise ValueError('shape of proj should be '
+                             f'{(self._horizon, m, n_output)}, '
+                             f'got {proj.shape}')
 
         csc_trans = block_diag(proj, format='csc')
         self._qp_constraint.modified = True
@@ -273,12 +274,13 @@ class Mpc:
 
         if proj is None:
             if m != n_control:
-                raise ValueError(f'proj must be provided if m ({
-                                 m}) != n_control ({n_control})')
+                raise ValueError(f'proj must be provided if m ({m})'
+                                 f' != n_control ({n_control})')
             proj = np.stack([np.eye(n_control)] * self._horizon)
         elif proj.shape != (self._horizon, m, n_control):
-            raise ValueError(f'shape of proj should be {
-                             (self._horizon, m, n_control)}, got {proj.shape}')
+            raise ValueError('shape of proj should be '
+                             f'{(self._horizon, m, n_control)}, '
+                             f'got {proj.shape}')
 
         csc_trans = block_diag(proj, format='csc')
         self._qp_constraint.modified = True
@@ -311,12 +313,13 @@ class Mpc:
 
         if proj is None:
             if m != n_control:
-                raise ValueError(f'proj must be provided if m ({
-                                 m}) != n_control ({n_control})')
+                raise ValueError(f'proj must be provided if m ({m})'
+                                 f' != n_control ({n_control})')
             proj = np.stack([np.eye(n_control)] * self._horizon)
         elif proj.shape != (self._horizon, m, n_control):
-            raise ValueError(f'shape of proj should be {
-                             (self._horizon, m, n_control)}, got {proj.shape}')
+            raise ValueError('shape of proj should be '
+                             f'{(self._horizon, m, n_control)}, '
+                             f'got {proj.shape}')
 
         csc_trans = block_diag(proj, format='csc')
         control_delta_csc_a = csc_trans @ self._csc_d_bar
@@ -509,7 +512,8 @@ class Mpc:
             # for j in range(i + 1):
             #     row_start_idx = n_control * j
             #     row_stop_idx = row_start_idx + n_control
-            #     c_bar_m_u[start_idx: stop_idx, row_start_idx: row_stop_idx] = \
+            #     c_bar_m_u[start_idx: stop_idx, \
+            #         row_start_idx: row_stop_idx] = \
             #         c_bar_m_d_i[j] @ bs[j]
             c_bar_m_u[start_idx: stop_idx, :n_control*(i+1)] = \
                 np.einsum('ijk,ikl->jil',

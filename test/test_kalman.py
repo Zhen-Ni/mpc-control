@@ -142,7 +142,8 @@ class TestEKF(unittest.TestCase):
     def test_observe_nonlinear_state(self):
         """State observer of a nonlinear system."""
         def A_true(x, u):
-            return np.array([0.5, 1., 0., 0.48 + np.sin(u[0]+0.02)]).reshape(2, 2)
+            return np.array([0.5, 1.,
+                             0., 0.48 + np.sin(u[0]+0.02)]).reshape(2, 2)
 
         def A_est(x, u):
             return np.array([0.5, 1., 0., 0.5 + np.sin(u[0])]).reshape(2, 2)
@@ -321,7 +322,8 @@ class TestUKF(unittest.TestCase):
     def test_observe_nonlinear_state(self):
         """State observer of a nonlinear system."""
         def A_true(x, u):
-            return np.array([0.5, 1., 0., 0.48 + np.sin(u[0]+0.02)]).reshape(2, 2)
+            return np.array([0.5, 1., 0.,
+                             0.48 + np.sin(u[0]+0.02)]).reshape(2, 2)
 
         def A_est(x, u):
             return np.array([0.5, 1., 0., 0.5 + np.sin(u[0])]).reshape(2, 2)
