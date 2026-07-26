@@ -15,7 +15,7 @@ class TestEKF(unittest.TestCase):
         c1, c2 = 0.2, 0.3
         k1, k2 = 15.0, 20.0
         # state variables: [x1, v1, x2, v2]
-        # inputs: [u1, u2]
+        # inputs: [u1, -u2]
         A = np.array([
             [0, 1, 0, 0],
             [-(k1 + k2) / m1, -(c1 + c2) / m1, k2 / m1, c2 / m1],
@@ -26,7 +26,7 @@ class TestEKF(unittest.TestCase):
             [0],
             [1 / m1],
             [0],
-            [1 / m2]
+            [-1 / m2]
         ])
         # Output the displacement of the second point
         C = np.array([
@@ -80,7 +80,7 @@ class TestEKF(unittest.TestCase):
         c1, c2 = 0.2, 0.3
         k1, k2 = 15.0, 20.0
         # state variables: [x1, v1, x2, v2]
-        # inputs: [u1, u2]
+        # inputs: [u1, -u2]
         A = np.array([
             [0, 1, 0, 0],
             [-(k1 + k2) / m1, -(c1 + c2) / m1, k2 / m1, c2 / m1],
@@ -91,7 +91,7 @@ class TestEKF(unittest.TestCase):
             [0],
             [1 / m1],
             [0],
-            [1 / m2]
+            [-1 / m2]
         ])
         # Output the displacement of the second point
         C = np.array([
@@ -206,7 +206,7 @@ class TestUKF(unittest.TestCase):
             [0],
             [1 / m1],
             [0],
-            [1 / m2]
+            [-1 / m2]
         ])
         # Output the displacement of the second point
         C = np.array([
@@ -260,7 +260,7 @@ class TestUKF(unittest.TestCase):
         c1, c2 = 0.2, 0.3
         k1, k2 = 15.0, 20.0
         # state variables: [x1, v1, x2, v2]
-        # inputs: [u1, u2]
+        # inputs: [u1, -u2]
         A = np.array([
             [0, 1, 0, 0],
             [-(k1 + k2) / m1, -(c1 + c2) / m1, k2 / m1, c2 / m1],
@@ -271,7 +271,7 @@ class TestUKF(unittest.TestCase):
             [0],
             [1 / m1],
             [0],
-            [1 / m2]
+            [-1 / m2]
         ])
         # Output the displacement of the second point
         C = np.array([
