@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
 import abc
-from typing import Optional
+from typing import Optional, TypeVar, Generic
 import numpy as np
 from scipy import linalg
 from . import discrete
 
 
-class Rls(abc.ABC):
+_T_system = TypeVar('_T_system', bound=discrete.Discrete)
+
+
+class Rls(abc.ABC, Generic[_T_system]):
     r"""Solver class for Recursive Least Squares (RLS).
 
     This class provides the RLS algorithm for online parameter
@@ -69,7 +72,7 @@ class Rls(abc.ABC):
         """
         ...
 
-    def __init__(self, system: discrete.Discrete, delta: float):
+    def __init__(self, system: _T_system, delta: float):
         """Initialize the RLS solver.
 
         Args:
@@ -90,17 +93,19 @@ class Rls(abc.ABC):
         self._delta = delta
         self._p: Optional[np.ndarray] = None
 
+        self._parameter_cache: Optional[np.ndarray] = None
+
     @property
-    def system(self) -> discrete.Discrete:
+    def system(self) -> _T_system:
         """The target system instance to be identified."""
         return self._system
 
-    def update(self,
-               error: np.ndarray,
-               forgetting_factor: float,
-               state: Optional[np.ndarray] = None,
-               control: Optional[np.ndarray] = None
-               ):
+    def step(self,
+             error: np.ndarray,
+             forgetting_factor: float,
+             state: Optional[np.ndarray] = None,
+             control: Optional[np.ndarray] = None
+             ):
         r"""Update the parameter estimate using the RLS algorithm.
 
         Args:
@@ -122,7 +127,9 @@ class Rls(abc.ABC):
             state: current state vector of shape (n_state, ).
             control: current control input of shape (n_control, ).
         """
-        theta = self.get_parameter()
+        if self._parameter_cache is None:
+            self._parameter_cache = self.get_parameter().copy()
+        theta = self._parameter_cache
         phi = self.get_coefficient(state, control)
         p = np.eye(len(theta)) * self._delta if self._p is None else self._p
 
@@ -138,10 +145,15 @@ class Rls(abc.ABC):
         K = linalg.solve(S, P_phi.T, assume_a='pos').T
 
         # 2. Update parameters
-        self.set_parameter(theta - K @ error)
+        self._parameter_cache = theta - K @ error
 
         # 3. Update covariance matrix P
         # Since P is symmetric, phi.T @ p is equivalent to P_phi.T
         p = (p - K @ P_phi.T) / forgetting_factor
         # Enforce symmetry to avoid numerical drift
         self._p = (p + p.T) / 2.0
+
+    def update(self):
+        if self._parameter_cache is not None:
+            self.set_parameter(self._parameter_cache)
+            self._parameter_cache = None
