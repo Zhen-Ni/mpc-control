@@ -19,7 +19,7 @@ class Rls(abc.ABC, Generic[_T_system]):
 
     Mathematical Derivation:
         1. Identification model offset:
-           e = \hat{y} - y
+           e = y - \hat{y}
 
         2. Cost function:
            J = \sum_{i=0}^{t} \lambda^{t-i} \|e(i)\|^2
@@ -27,7 +27,7 @@ class Rls(abc.ABC, Generic[_T_system]):
 
         3. RLS Update Equations:
            K = P \Phi (\lambda I + \Phi^T P \Phi)^{-1}
-           \theta_{new} = \theta - K e
+           \theta_{new} = \theta + K e
            P_{new} = (P - K \Phi^T P) / \lambda
 
     where y is the true measurement and \hat{y} is the estimated output.
@@ -110,8 +110,8 @@ class Rls(abc.ABC, Generic[_T_system]):
 
         Args:
             error: The estimation offset vector of shape (n_error, 1).
-                Must be defined as (\hat{y} - y), i.e., the estimated
-                output minus the true measurement.
+                Must be defined as (y - \hat{y}), i.e., the true
+                measurement minus the estimated output.
             forgetting_factor: The forgetting factor (lambda) that
                 weights recent data more heavily. Should be in (0, 1).
                 A value of 1.0 means no forgetting, treating all past
@@ -145,7 +145,7 @@ class Rls(abc.ABC, Generic[_T_system]):
         K = linalg.solve(S, P_phi.T, assume_a='pos').T
 
         # 2. Update parameters
-        self._parameter_cache = theta - K @ error
+        self._parameter_cache = theta + K @ error
 
         # 3. Update covariance matrix P
         # Since P is symmetric, phi.T @ p is equivalent to P_phi.T

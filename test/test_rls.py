@@ -110,7 +110,7 @@ class TestRls(unittest.TestCase):
             y_ref = sys_ref.get_output(x_ref[None])[0]
             x_rls = sys_rls.get_state(state, u[None])[0]
             y_rls = sys_ref.get_output(x_rls[None])[0]
-            e = y_rls - y_ref
+            e = y_ref - y_rls
             s_rls.step(e, forgetting_factor, x_ref, u)
             s_rls.update()
             state = x_ref
@@ -152,7 +152,7 @@ class TestRls(unittest.TestCase):
             y_ref = sys_ref.get_output(x_ref[None])[0]
             x_rls = sys_rls.get_state(state, u[None])[0]
             y_rls = sys_ref.get_output(x_rls[None])[0]
-            e = y_rls - y_ref
+            e = y_ref - y_rls
             s_rls.step(e, forgetting_factor, x_ref, u)
             s_rls.update()
             state = x_ref
@@ -196,7 +196,7 @@ class TestRls(unittest.TestCase):
             y_ref = sys_ref.get_output(x_ref[None])[0]
             x_rls = sys_rls.get_state(state, u[None])[0]
             y_rls = sys_ref.get_output(x_rls[None])[0]
-            e = y_rls - y_ref
+            e = y_ref - y_rls
             s_rls.step(e, forgetting_factor, x_ref, u)
             s_rls.update()
             state = x_ref
