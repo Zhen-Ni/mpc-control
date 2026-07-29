@@ -115,7 +115,7 @@ class Ekf:
         self._linearized = self._system.linearize(self._x, u)
         a = self._linearized.transition_matrix
         b = self._linearized.control_matrix
-        d = self._linearized.disturbance_vector
+        d = self._linearized.state_disturbance_vector
         x = a @ self._x + b @ u + d
         P = a @ self._p @ a.T + q
         self._x = x
@@ -354,11 +354,11 @@ class Ukf:
 
         # Update state and covariance
         z_arr = np.asarray(z)
-        x_n_stateew = self._x + k @ (z_arr - z_pred)
-        p_n_stateew = self._p - k @ S @ k.T
+        x_new = self._x + k @ (z_arr - z_pred)
+        p_new = self._p - k @ S @ k.T
 
         # Update caches
         self._k = k
-        self._x = x_n_stateew
-        self._p = p_n_stateew
+        self._x = x_new
+        self._p = (p_new + p_new.T) / 2
         self._sigmas_pred = None

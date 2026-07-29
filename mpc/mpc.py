@@ -52,7 +52,7 @@ def _build_csc_delta_matrix(qp_dim: int, n_control: int) -> csc_array:
 class _QpInternal:
     c_bar_m_x: np.ndarray         # c_bar @ m_x
     c_bar_m_u: np.ndarray         # c_bar @ m_u
-    c_bar_m_d_d: np.ndarray       # c_bar @ m_d @ d
+    c_bar_m_offset: np.ndarray    # c_bar @ m_w @ w + V
     c_bar_m_u_t_q_bar: np.ndarray  # c_bar_m_u.T @ q_bar
     csc_p: csc_array
     q: np.ndarray
@@ -89,8 +89,8 @@ class Mpc:
     """Model Predictive Controller.
 
     For discrete time-invariant systems:
-        x[n+1] = A * x[n] + B * u[n] + d
-        y[n]   = C * x[n]
+        x[n+1] = A * x[n] + B * u[n] + w
+        y[n]   = C * x[n] + v
     Formulates and solves a QP problem using OSQP:
         min  0.5 * U^T * P * U + q^T * U
         s.t. l <= A_c * U <= u
@@ -352,7 +352,7 @@ class Mpc:
             lb, ub, csc_trans = self._qp_constraint.output_bound
             a = csc_trans @ self._qp_internal.c_bar_m_u
             offset = csc_trans @ (self._qp_internal.c_bar_m_x @ initial_state +
-                                  self._qp_internal.c_bar_m_d_d)
+                                  self._qp_internal.c_bar_m_offset)
             lb = lb.reshape(-1) - offset
             ub = ub.reshape(-1) - offset
             a_list.append(csc_array(a))
@@ -406,7 +406,7 @@ class Mpc:
         if self._qp_constraint.output_bound:
             lb, ub, csc_trans = self._qp_constraint.output_bound
             offset = csc_trans @ (self._qp_internal.c_bar_m_x @ initial_state +
-                                  self._qp_internal.c_bar_m_d_d)
+                                  self._qp_internal.c_bar_m_offset)
             lb_list.append(lb.reshape(-1) - offset)
             ub_list.append(ub.reshape(-1) - offset)
 
@@ -429,12 +429,13 @@ class Mpc:
     def _assemble_linear_qp_helper(
             self,
             state_ref, control_ref, n_state, n_control, n_output,
-            c_bar_m_x, c_bar_m_u, c_bar_m_d_d):
+            c_bar_m_x, c_bar_m_u, c_bar_m_offset):
         """Assemble the qp intermediate matrixes inplace."""
         a = self._system.transition_matrix
         b = self._system.control_matrix
-        d = self._system.disturbance_vector
+        w = self._system.state_disturbance_vector
         c = self._system.output_matrix
+        v = self._system.output_disturbance_vector
 
         c_a_powers = np.zeros([self._horizon + 1, n_output, n_state])
         c_a_powers[0] = c
@@ -456,55 +457,56 @@ class Mpc:
                           c_a_powers[i::-1],
                           b).reshape(n_output, -1)
 
-            # c_bar_m_d_d
+            # c_bar_m_offset
             c_a_sum += c_a_powers[i]
-            c_bar_m_d_d[start_idx: stop_idx] = (c_a_sum @ d).reshape(-1)
+            c_bar_m_offset[start_idx: stop_idx] = (c_a_sum @ w + v).reshape(-1)
 
     def _assemble_nonlinear_qp_helper(
             self,
             state_ref, control_ref, n_state, n_control, n_output,
-            c_bar_m_x, c_bar_m_u, c_bar_m_d_d):
+            c_bar_m_x, c_bar_m_u, c_bar_m_offset):
         """Assemble the qp intermediate matrixes inplace."""
         if state_ref is None:
             state_ref = [None] * self._horizon
         if control_ref is None:
             control_ref = [None] * self._horizon
 
-        m_d = np.zeros([self._horizon, self._horizon,
+        m_w = np.zeros([self._horizon, self._horizon,
                         n_state, n_state])
-        c_bar_m_d_i = np.zeros([self._horizon, n_output, n_state])
+        c_bar_m_w_i = np.zeros([self._horizon, n_output, n_state])
         a_0 = np.zeros([n_state, n_state])
 
-        # Store control_matrix and disturbane vectors.
+        # Store control_matrix and state disturbance vectors.
         bs = np.zeros([self._horizon, n_state, n_control])
-        ds = np.zeros([self._horizon, n_state])
+        ws = np.zeros([self._horizon, n_state])
 
         for i in range(self._horizon):
             system = self._system.linearize(state_ref[i], control_ref[i])
             a_i = system.transition_matrix
             b_i = system.control_matrix
-            d_i = system.disturbance_vector
+            w_i = system.state_disturbance_vector
             c_i = system.output_matrix
+            v_i = system.output_disturbance_vector
 
-            # Build m_d
-            m_d[i, i] = np.eye(n_state)
+            # Build m_w
+            m_w[i, i] = np.eye(n_state)
             # Use vectorized operation for better performance
             # for j in range(i):
-            #     m_d[i, j] = a_i @ m_d[i - 1, j]
-            m_d[i, :i] = a_i @ m_d[i - 1, :i]
+            #     m_w[i, j] = a_i @ m_w[i - 1, j]
+            m_w[i, :i] = a_i @ m_w[i - 1, :i]
 
-            # Cache c_bar_m_d_i for this horizon.
+            # Cache c_bar_m_w_i for this horizon.
             # Use vectorized operation for better performance
             # for j in range(i + 1):
-            #     c_bar_m_d_i[j] = c_i @ m_d[i, j]
-            c_bar_m_d_i[:i+1] = c_i @ m_d[i, :i + 1]
+            #     c_bar_m_w_i[j] = c_i @ m_w[i, j]
+            c_bar_m_w_i[:i+1] = c_i @ m_w[i, :i + 1]
 
             # Build c_bar_m_x
             if i == 0:
                 a_0 = a_i
             start_idx = n_output * i
             stop_idx = start_idx + n_output
-            c_bar_m_x[start_idx: stop_idx, :] = c_bar_m_d_i[0] @ a_0
+            c_bar_m_x[start_idx: stop_idx, :] = c_bar_m_w_i[0] @ a_0
 
             # Build c_bar_m_u
             bs[i] = b_i
@@ -514,19 +516,19 @@ class Mpc:
             #     row_stop_idx = row_start_idx + n_control
             #     c_bar_m_u[start_idx: stop_idx, \
             #         row_start_idx: row_stop_idx] = \
-            #         c_bar_m_d_i[j] @ bs[j]
+            #         c_bar_m_w_i[j] @ bs[j]
             c_bar_m_u[start_idx: stop_idx, :n_control*(i+1)] = \
                 np.einsum('ijk,ikl->jil',
-                          c_bar_m_d_i[:i+1],
+                          c_bar_m_w_i[:i+1],
                           bs[:i+1]).reshape(n_output, -1)
 
-            # Build c_bar_m_d_d
-            ds[i] = d_i
+            # Build c_bar_m_offset
+            ws[i] = w_i
             # Use vectorized operation for better performance.
-            # c_bar_m_d_d[start_idx: stop_idx] = \
-            # sum([c_bar_m_d_i[j] @ ds[j] for j in range(i+1)])
-            c_bar_m_d_d[start_idx: stop_idx] = \
-                np.einsum('ijk,ik->j', c_bar_m_d_i[:i+1], ds[:i+1])
+            # c_bar_m_offset[start_idx: stop_idx] = \
+            # sum([c_bar_m_w_i[j] @ ws[j] for j in range(i+1)]) + v_i
+            c_bar_m_offset[start_idx: stop_idx] = \
+                np.einsum('ijk,ik->j', c_bar_m_w_i[:i+1], ws[:i+1]) + v_i
 
     def _build_qp(self,
                   target_output: np.ndarray,
@@ -546,9 +548,9 @@ class Mpc:
            U = [u_0^T, u_1^T, ..., u_{N-1}^T]^T
            Y = [y_1^T, y_2^T, ..., y_N^T]^T
 
-           X = M_x * x_0 + M_u * U + M_d * d
-           Y = C_bar * X
-             = C_bar * M_x * x_0 + C_bar * M_u * U + C_bar * M_d * d
+           X = M_x * x_0 + M_u * U + M_w * w
+           Y = C_bar * X + V
+             = C_bar * M_x * x_0 + C_bar * M_u * U + C_bar * M_w * w + V
 
         2. Cost function:
            J = (Y - Y_ref)^T * Q_bar * (Y - Y_ref)
@@ -560,7 +562,7 @@ class Mpc:
            previous control input)
 
         3. OSQP standard form (min 0.5 * U^T * P * U + q^T * U):
-           Let E_y = C_bar * M_x * x_0 + C_bar * M_d * d - Y_ref
+          Let E_y = C_bar * M_x * x_0 + C_bar * M_w * w + V - Y_ref
            Expanding the cost function and extracting the
         quadratic and linear terms (ignoring constant terms):
            J = 0.5 * U^T * (2 * M_u^T * C_bar^T * Q_bar * C_bar * M_u
@@ -596,22 +598,23 @@ class Mpc:
         # Build M_x, M_u, C_bar
         c_bar_m_x = np.zeros([n_total_output, n_state])
         c_bar_m_u = np.zeros([n_total_output, self._mpc_dim])
-        c_bar_m_d_d = np.zeros([n_total_output, ])
+        c_bar_m_offset = np.zeros([n_total_output, ])
         if isinstance(self._system, AffineTimeInvariant):
             self._assemble_linear_qp_helper(
                 state_ref, control_ref, n_state, n_control, n_output,
-                c_bar_m_x, c_bar_m_u, c_bar_m_d_d)
+                c_bar_m_x, c_bar_m_u, c_bar_m_offset)
         else:
             self._assemble_nonlinear_qp_helper(
                 state_ref, control_ref, n_state, n_control, n_output,
-                c_bar_m_x, c_bar_m_u, c_bar_m_d_d)
+                c_bar_m_x, c_bar_m_u, c_bar_m_offset)
 
         # Build internal matrixes
         csc_q_bar = self._csc_output_weighting
 
         # Calculate P and q for output (y).
         y_ref_vec = target_output.reshape(-1)
-        e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
+        e_y = (c_bar_m_x @ initial_state +
+               c_bar_m_offset).reshape(-1) - y_ref_vec
         c_bar_m_u_t_q_bar = c_bar_m_u.T @ csc_q_bar
         p = c_bar_m_u_t_q_bar @ c_bar_m_u
         q = c_bar_m_u_t_q_bar @ e_y
@@ -630,7 +633,7 @@ class Mpc:
             q -= csc_d_bar_t_r_delta_bar[:, :n_control] @ previous_control
 
         self._qp_internal = _QpInternal(
-            c_bar_m_x, c_bar_m_u, c_bar_m_d_d, c_bar_m_u_t_q_bar,
+            c_bar_m_x, c_bar_m_u, c_bar_m_offset, c_bar_m_u_t_q_bar,
             csc_array(p), q, )
 
     def _update_qp(self,
@@ -651,11 +654,12 @@ class Mpc:
                 'problem is built by `_build_qp`')
 
         c_bar_m_x = self._qp_internal.c_bar_m_x
-        c_bar_m_d_d = self._qp_internal.c_bar_m_d_d
+        c_bar_m_offset = self._qp_internal.c_bar_m_offset
         c_bar_m_u_t_q_bar = self._qp_internal.c_bar_m_u_t_q_bar
         y_ref_vec = target_output.reshape(-1)
 
-        e_y = (c_bar_m_x @ initial_state + c_bar_m_d_d).reshape(-1) - y_ref_vec
+        e_y = (c_bar_m_x @ initial_state +
+               c_bar_m_offset).reshape(-1) - y_ref_vec
         q = c_bar_m_u_t_q_bar @ e_y
 
         if self._control_delta_weighting is not None:

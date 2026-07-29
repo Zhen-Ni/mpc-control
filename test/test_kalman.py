@@ -154,8 +154,10 @@ class TestEKF(unittest.TestCase):
         def C(x):
             return np.array([1., 0.]).reshape(1, 2)
 
-        system_true = mpc.HomogeneousSystem(2, 1, 1, A_true, B, C)
-        system_est = mpc.HomogeneousSystem(2, 1, 1, A_est, B, C)
+        system_true = mpc.HomogeneousSystem(2, 1, 1, A_true, B, C,
+                                            lambda x: np.zeros([1]))
+        system_est = mpc.HomogeneousSystem(2, 1, 1, A_est, B, C,
+                                           lambda x: np.zeros([1]))
 
         n = 100
         inputs = np.sin(2 * np.pi * np.arange(n) / 20)
@@ -334,8 +336,10 @@ class TestUKF(unittest.TestCase):
         def C(x):
             return np.array([1., 0.]).reshape(1, 2)
 
-        system_true = mpc.HomogeneousSystem(2, 1, 1, A_true, B, C)
-        system_est = mpc.HomogeneousSystem(2, 1, 1, A_est, B, C)
+        system_true = mpc.HomogeneousSystem(2, 1, 1, A_true, B, C,
+                                            lambda x: np.zeros([1]))
+        system_est = mpc.HomogeneousSystem(2, 1, 1, A_est, B, C,
+                                           lambda x: np.zeros([1]))
 
         n = 100
         inputs = np.sin(2 * np.pi * np.arange(n) / 20)
