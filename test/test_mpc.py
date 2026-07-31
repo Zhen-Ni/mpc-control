@@ -84,8 +84,7 @@ class TestMpc(unittest.TestCase):
         def C(x):
             return np.array([1., 0.]).reshape(1, 2)
 
-        s = mpc.HomogeneousSystem(2, 1, 1, A, B, C,
-                                  lambda x: np.zeros([1]))
+        s = mpc.HomogeneousSystem(2, 1, 1, A, B, C)
         x0 = np.array([1., 0.])
         horizon = 50
         n_sim = 100

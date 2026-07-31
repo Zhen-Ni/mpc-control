@@ -430,9 +430,7 @@ class HomogeneousSystem(Discrete):
             control_matrix: Callable[[np.ndarray, np.ndarray],
                                      np.ndarray],
             output_matrix: Callable[[np.ndarray],
-                                    np.ndarray],
-            output_disturbance_vector: Callable[[np.ndarray],
-                                                np.ndarray]):
+                                    np.ndarray]):
         """Initialize the discrete non-linear system with disturbance.
 
         Args:
@@ -448,9 +446,6 @@ class HomogeneousSystem(Discrete):
             output_matrix: callable that returns the output matrix C.
                 Signature: C(state) -> np.ndarray of shape
                 (n_output, n_state).
-            output_disturbance_vector: callable that returns the output
-                disturbance vector v. Signature: v(state) -> np.ndarray
-                of shape (n_output,).
         """
         self._n_state = n_state
         self._n_control = n_control
@@ -458,7 +453,6 @@ class HomogeneousSystem(Discrete):
         self._a = transition_matrix
         self._b = control_matrix
         self._c = output_matrix
-        self._v = output_disturbance_vector
 
     @override
     @property
@@ -518,7 +512,7 @@ class HomogeneousSystem(Discrete):
         """
         if state is None:
             raise ValueError('state can not be None')
-        return (self._c(state), self._v(state))
+        return (self._c(state), np.zeros(self.n_output))
 
 
 @final
