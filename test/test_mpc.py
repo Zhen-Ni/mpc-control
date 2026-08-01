@@ -3,7 +3,7 @@
 import unittest
 
 import numpy as np
-import mpc
+import mpc_control as mpc
 
 
 class TestMpc(unittest.TestCase):

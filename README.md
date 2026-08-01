@@ -44,13 +44,17 @@ $$
 where $M_x$, $M_u$, and $M_w$ are block matrices defined as:
 
 $$
-M_x = \begin{bmatrix} A \\ A^2 \\ \cdots \\ A^N \end{bmatrix}, \quad
+M_x = \begin{bmatrix} A \\ A^2 \\ \cdots \\ A^N \end{bmatrix}
+$$
+$$
 M_u = \begin{bmatrix} 
 B & 0 & \dots & 0 \\ 
 AB & B & \dots & 0 \\ 
 \vdots & \vdots & \ddots & \vdots \\ 
 A^{N-1}B & A^{N-2}B & \dots & B 
-\end{bmatrix}, \quad
+\end{bmatrix}
+$$
+$$
 M_w = \begin{bmatrix} 
 I & 0 & \dots & 0 \\ 
 A+I & I & \dots & 0 \\ 
@@ -144,7 +148,7 @@ Here is a basic example of how to define a system and solve an MPC problem:
 
 ```python
 import numpy as np
-import mpc
+immport mpc_control as mpc
 
 # 1. Define a discrete LTI system
 # x[n+1] = A x[n] + B u[n]

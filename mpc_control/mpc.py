@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Model Predictive Control (MPC) module.
+
+Provides the `Mpc` class for formulating and solving quadratic
+programming (QP) problems using OSQP for discrete-time systems
+(including linear, affine, and linearized nonlinear systems).
+"""
 
 from __future__ import annotations
 from typing import Optional

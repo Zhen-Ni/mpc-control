@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from mpc import Mpc, LtiSystem, HomogeneousSystem, NonlinearSystem
+from mpc_control import Mpc, LtiSystem, HomogeneousSystem, NonlinearSystem
 
 import matplotlib.pyplot as plt
 

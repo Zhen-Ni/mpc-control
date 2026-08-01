@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import mpc
+import mpc_control as mpc
 
 import matplotlib.pyplot as plt
 plt.rc('font', family='STIXGeneral', weight='normal', size=10)

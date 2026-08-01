@@ -5,8 +5,8 @@
 import unittest
 import numpy as np
 
-from mpc.discrete import LtiSystem
-from mpc.plant import Plant, LoggedPlant
+from mpc_control.discrete import LtiSystem
+from mpc_control.plant import Plant, LoggedPlant
 
 
 class TestPlant(unittest.TestCase):
