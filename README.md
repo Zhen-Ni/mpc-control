@@ -1,3 +1,7 @@
+[![PyPI version](https://badge.fury.io/py/mpc-control.svg)](https://badge.fury.io/py/mpc-control)
+[![CI Status](https://github.com/Zhen-Ni/mpc-control/actions/workflows/ci.yml/badge.svg)](https://github.com/Zhen-Ni/mpc-control/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 # A Python library for model predictive control.
 
 A Python library for Model Predictive Control (MPC), integrating system modeling, state estimation, parameter identification, and Quadratic Programming (QP) based MPC solvers.
