@@ -2,18 +2,91 @@
 [![CI Status](https://github.com/Zhen-Ni/mpc-control/actions/workflows/ci.yml/badge.svg)](https://github.com/Zhen-Ni/mpc-control/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-# A Python library for model predictive control.
+# mpc-control: A Python Library for Model Predictive Control
 
-A Python library for Model Predictive Control (MPC), integrating system modeling, state estimation, parameter identification, and Quadratic Programming (QP) based MPC solvers.
+A lightweight yet powerful Python library for Model Predictive Control (MPC). It integrates system modeling, state estimation, parameter identification, and Quadratic Programming (QP) based MPC solvers. Supports both linear and nonlinear systems out of the box.
 
-## Requirements
+## ✨ Features
 
+- **System Models (`mpc.discrete`)**: Supports discrete-time system modeling, including Linear Time-Invariant (LTI), Affine Time-Invariant (ATI), Nonlinear, and Homogeneous systems.
+- **Simulation Environment (`mpc.plant`)**: Provides `Plant` and `LoggedPlant` classes for basic discrete system simulation and state/input/output history logging.
+- **Model Predictive Control (`mpc.mpc`)**: Formulates and solves QP problems using the OSQP solver. Supports output, control, and control delta weighting, as well as constraints on output, control, and control rate. Supports linearization along reference trajectories for nonlinear systems.
+- **State Estimation (`mpc.kalman`)**: Implements Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for state estimation of nonlinear systems.
+- **Parameter Identification (`mpc.rls`)**: Provides an extensible Recursive Least Squares (RLS) framework for online system parameter identification.
+
+## 📦 Installation
+
+The library is available on PyPI. You can install it via pip:
+
+```bash
+pip install mpc-control
+```
+
+**Requirements:**
 - Python 3.9+ (Tested with Python 3.12)
-- NumPy
-- SciPy
-- OSQP
+- NumPy, SciPy, OSQP
 
-## Model predictive control
+## 🚀 Quick Start
+
+Here is a basic example of how to define a system and solve an MPC problem:
+
+```python
+import numpy as np
+import mpc_control as mpc
+
+# 1. Define a discrete LTI system
+# x[n+1] = A x[n] + B u[n]
+# y[n]   = C x[n]
+system = mpc.LtiSystem(
+    transition_matrix=np.array([[1.0, 1.0],
+                                [0.0, 1.0]]),
+    control_matrix=np.array([[0.0],
+                             [1.0]]),
+    output_matrix=np.array([[1.0, 0.0]])
+)
+
+# 2. Initialize the MPC controller
+horizon = 10
+n_output = system.n_output
+n_control = system.n_control
+
+Q = np.stack([np.eye(n_output)] * horizon)  # Output weighting
+R = np.stack([np.eye(n_control) * 0.1] * horizon)  # Control weighting
+
+controller = mpc.Mpc(
+    system=system,
+    horizon=horizon,
+    output_weighting=Q,
+    control_weighting=R
+)
+
+# 3. Set up the problem and solve
+target_output = np.zeros([horizon, n_output])
+initial_state = np.array([1.0, 0.0])
+
+u_optimal = controller.solve(
+    target_output=target_output,
+    initial_state=initial_state
+)
+
+print("Optimal control sequence:\n", u_optimal)
+```
+
+## 📚 Examples
+
+The `examples/` directory contains various scripts demonstrating the capabilities of the library. You can run them directly to see MPC in action.
+
+### Comprehensive Scenarios
+- **`example_first_order.py`**: Vehicle lateral kinematic control. Demonstrates combining RLS parameter identification, EKF state estimation, and MPC control simultaneously.
+- **`mpc_unittest_examples.py`**: A collection of 10 specific MPC scenarios:
+  - `example_1`: Track a sine wave output path.
+  - `example_2`: Stabilize a LTI system.
+  - `example_3`, `example_4`, `example_5`: Maintain output for nonlinear systems with state/output disturbances.
+  - `example_6`, `example_7`, `example_8`: MPC with constraints on control input, output, and control change rate.
+  - `example_9`: MPC with transformed control constraints.
+  - `example_10`: Trajectory planning using terminal output weighting.
+
+## 🧮 Mathematical Background
 
 ### System Prediction Model
 
@@ -142,55 +215,10 @@ $$
 
 The QP problem is then formulated using these LTV matrices. The prediction matrices $M_x, M_u, M_w$ and the output mapping $\bar{C}$ become time-varying and are constructed iteratively over the horizon to reflect the changing linearization points. The reference trajectory for linearization can be provided to the solver via the `state_ref` and `control_ref` arguments.
 
-## Features
+## 🤝 Contributing
 
-- **System Models (`mpc.discrete`)**: Supports discrete-time system modeling, including Linear Time-Invariant (LTI), Affine Time-Invariant (ATI), Nonlinear, and Homogeneous systems.
-- **Model Predictive Control (`mpc.mpc`)**: Formulates and solves QP problems using the OSQP solver. Supports output, control, and control delta weighting, as well as constraints on output, control, and control rate.
-- **State Estimation (`mpc.kalman`)**: Implements Extended Kalman Filter (EKF) and Unscented Kalman Filter (UKF) for state estimation of nonlinear systems.
-- **Parameter Identification (`mpc.rls`)**: Provides Recursive Least Squares (RLS) algorithms for online system parameter identification.
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Zhen-Ni/mpc-control/issues).
 
-## Usage
+## 📄 License
 
-Here is a basic example of how to define a system and solve an MPC problem:
-
-```python
-import numpy as np
-import mpc_control as mpc
-
-# 1. Define a discrete LTI system
-# x[n+1] = A x[n] + B u[n]
-# y[n]   = C x[n]
-system = mpc.LtiSystem(
-    transition_matrix=np.array([[1.0, 1.0],
-                                [0.0, 1.0]]),
-    control_matrix=np.array([[0.0],
-                             [1.0]]),
-    output_matrix=np.array([[1.0, 0.0]])
-)
-
-# 2. Initialize the MPC controller
-horizon = 10
-n_output = system.n_output
-n_control = system.n_control
-
-Q = np.stack([np.eye(n_output)] * horizon)  # Output weighting
-R = np.stack([np.eye(n_control) * 0.1] * horizon)  # Control weighting
-
-controller = mpc.Mpc(
-    system=system,
-    horizon=horizon,
-    output_weighting=Q,
-    control_weighting=R
-)
-
-# 3. Set up the problem and solve
-target_output = np.zeros([horizon, n_output])
-initial_state = np.array([1.0, 0.0])
-
-u_optimal = controller.solve(
-    target_output=target_output,
-    initial_state=initial_state
-)
-
-print("Optimal control sequence:\n", u_optimal)
-```
+This project is [MIT](LICENSE) licensed.
