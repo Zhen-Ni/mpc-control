@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 from scipy.signal import cont2discrete
 
-import mpc_control as mpc
+import mpc
 
 
 class TestEKF(unittest.TestCase):

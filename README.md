@@ -26,7 +26,8 @@ y[n]   &= C x[n] + v
 \end{aligned}
 $$
 
-Prediction over horizon $N$:
+Prediction over horizon
+$N$:
 
 $$
 \begin{aligned}
@@ -50,6 +51,7 @@ where $M_x$, $M_u$, and $M_w$ are block matrices defined as:
 $$
 M_x = \begin{bmatrix} A \\ A^2 \\ \cdots \\ A^N \end{bmatrix}
 $$
+
 $$
 M_u = \begin{bmatrix} 
 B & 0 & \dots & 0 \\ 
@@ -58,6 +60,7 @@ AB & B & \dots & 0 \\
 A^{N-1}B & A^{N-2}B & \dots & B 
 \end{bmatrix}
 $$
+
 $$
 M_w = \begin{bmatrix} 
 I & 0 & \dots & 0 \\ 

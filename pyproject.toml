@@ -33,5 +33,5 @@ Homepage = "https://github.com/Zhen-Ni/mpc-control"
 Issues = "https://github.com/Zhen-Ni/mpc-control/issues"
 
 [tool.setuptools.packages.find]
-include = ["mpc_control*"]
+include = ["mpc*"]
 exclude = ["test*", "examples*"]

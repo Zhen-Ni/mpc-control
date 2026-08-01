@@ -1,5 +1,5 @@
 import numpy as np
-import mpc_control as mpc
+import mpc
 
 # 1. Define a discrete LTI system
 # x[n+1] = A x[n] + B u[n]
