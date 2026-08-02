@@ -32,7 +32,7 @@ Here is a basic example of how to define a system and solve an MPC problem:
 
 ```python
 import numpy as np
-import mpc_control as mpc
+import mpc
 
 # 1. Define a discrete LTI system
 # x[n+1] = A x[n] + B u[n]
