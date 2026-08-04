@@ -678,6 +678,88 @@ class Mpc:
 
         self._qp_internal.q = q
 
+    def _validate_previous_control(
+            self,
+            previous_control: Optional[np.ndarray]) -> np.ndarray:
+        if previous_control is not None:
+            return previous_control
+        # Use a placeholder for previous control, as it will not be
+        # used in this case.
+        if (self._control_delta_weighting is None and
+                self._qp_constraint.control_delta_bound is None):
+            return np.empty(self._system.n_control)
+        raise ValueError(
+            'previous_control must be provided if '
+            'control changing rate is involved.')
+
+    def _prepare_qp_matrices(
+            self,
+            target_output: np.ndarray,
+            initial_state: np.ndarray,
+            previous_control: np.ndarray,
+            state_ref: Optional[np.ndarray],
+            control_ref: Optional[np.ndarray],
+            use_cached_p: bool) -> None:
+        if use_cached_p:
+            self._update_qp(target_output, initial_state, previous_control)
+        else:
+            self._build_qp(target_output, initial_state, previous_control,
+                           state_ref, control_ref)
+
+    def _prepare_constraints(
+            self,
+            initial_state: np.ndarray,
+            previous_control: np.ndarray,
+            use_cached_a: bool) -> None:
+        if use_cached_a:
+            self._update_constraints(initial_state, previous_control)
+        else:
+            self._build_constraints(initial_state, previous_control)
+
+    def _setup_and_solve_osqp(
+            self,
+            max_iter: Optional[int],
+            eps_abs: Optional[float],
+            eps_rel: Optional[float],
+            control_ref: Optional[np.ndarray],
+            use_cached_p: bool,
+            use_cached_a: bool) -> Optional[np.ndarray]:
+        assert self._qp_internal is not None  # Make mypy happy
+
+        p = self._qp_internal.csc_p
+        q = self._qp_internal.q
+        a = self._qp_constraint.a
+        lb = self._qp_constraint.lb
+        ub = self._qp_constraint.ub
+
+        if self._osqp is None or not use_cached_p or not use_cached_a:
+            if self._osqp is None:
+                self._osqp = osqp.OSQP()
+            kwargs = dict(max_iter=max_iter,
+                          eps_abs=eps_abs,
+                          eps_rel=eps_rel)
+            kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
+            self._osqp.setup(p, q, a, lb, ub,
+                             warm_starting=True, verbose=False,
+                             **kwargs)
+        else:
+            self._osqp.update(q=q, l=lb, u=ub)
+            if max_iter is not None:
+                self._osqp.update_settings(max_iter=max_iter)
+            if eps_abs is not None:
+                self._osqp.update_settings(eps_abs=eps_abs)
+            if eps_rel is not None:
+                self._osqp.update_settings(eps_rel=eps_rel)
+
+        if control_ref is not None:
+            self._osqp.warm_start(x=np.asarray(control_ref).reshape(-1))
+
+        res = self._osqp.solve(raise_error=False)
+        self._result = res
+        if res.info.status == 'solved':
+            return res.x.reshape(self._horizon, self._system.n_control)
+        return None
+
     def solve(self,
               target_output: np.ndarray,
               initial_state: np.ndarray,
@@ -715,67 +797,20 @@ class Mpc:
             solved successfully.
 
         """
-        use_cached_p = (
-            self._qp_internal and
-            isinstance(self._system, AffineTimeInvariant))
-        use_cached_a = (
-            (not self._qp_constraint.modified) and
-            isinstance(self._system, AffineTimeInvariant))
+        use_cached_p = bool(self._qp_internal and
+                            isinstance(self._system, AffineTimeInvariant))
+        use_cached_a = bool((not self._qp_constraint.modified) and
+                            isinstance(self._system, AffineTimeInvariant))
 
-        if previous_control is None:
-            if (self._control_delta_weighting is None and
-                    self._qp_constraint.control_delta_bound is None):
-                # Set to empty because it will not be used anyway.
-                previous_control = np.empty(self._system.n_control)
-            else:
-                raise ValueError(
-                    'previous_control must be provided if '
-                    'control changing rate is involved.')
+        previous_control = self._validate_previous_control(previous_control)
 
-        if use_cached_p:
-            self._update_qp(target_output,
-                            initial_state, previous_control)
-        else:
-            self._build_qp(target_output,
-                           initial_state, previous_control,
-                           state_ref, control_ref)
+        self._prepare_qp_matrices(
+            target_output, initial_state, previous_control,
+            state_ref, control_ref, use_cached_p)
 
-        if use_cached_a:
-            self._update_constraints(initial_state, previous_control)
-        else:
-            self._build_constraints(initial_state, previous_control)
+        self._prepare_constraints(
+            initial_state, previous_control, use_cached_a)
 
-        assert self._qp_internal is not None  # Make mypy happy
-        p = self._qp_internal.csc_p
-        q = self._qp_internal.q
-        a = self._qp_constraint.a
-        lb = self._qp_constraint.lb
-        ub = self._qp_constraint.ub
-
-        if self._osqp is None or not use_cached_p or not use_cached_a:
-            if self._osqp is None:
-                self._osqp = osqp.OSQP()
-            kwargs = dict(max_iter=max_iter,
-                          eps_abs=eps_abs,
-                          eps_rel=eps_rel)
-            kwargs = {k: v for (k, v) in kwargs.items() if v is not None}
-            self._osqp.setup(p, q, a, lb, ub,
-                             warm_starting=True, verbose=False,
-                             **kwargs)
-        else:
-            self._osqp.update(q=q, l=lb, u=ub)
-            if max_iter is not None:
-                self._osqp.update_settings(max_iter=max_iter)
-            if eps_abs is not None:
-                self._osqp.update_settings(eps_abs=eps_abs)
-            if eps_rel is not None:
-                self._osqp.update_settings(eps_rel=eps_rel)
-
-        if control_ref is not None:
-            self._osqp.warm_start(x=np.asarray(control_ref).reshape(-1))
-        res = self._osqp.solve(raise_error=False)
-        self._result = res
-        if res.info.status == 'solved':
-            u = res.x.reshape(self._horizon, self._system.n_control)
-            return u
-        return None
+        return self._setup_and_solve_osqp(
+            max_iter, eps_abs, eps_rel, control_ref,
+            use_cached_p, use_cached_a)
