@@ -23,7 +23,7 @@ pip install mpc-control
 ```
 
 **Requirements:**
-- Python 3.9+ (Tested with Python 3.12)
+- Python 3.12+
 - NumPy, SciPy, OSQP
 
 ## 🚀 Quick Start
