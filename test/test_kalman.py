@@ -76,6 +76,7 @@ class TestEKF(unittest.TestCase):
 
     def test_observe_state_noised(self):
         """State observer of a linear system with noise."""
+        np.random.seed(0)
         m1, m2 = 1.0, 1.5
         c1, c2 = 0.2, 0.3
         k1, k2 = 15.0, 20.0
@@ -137,10 +138,12 @@ class TestEKF(unittest.TestCase):
         x_true = np.array(x_true_list)
         x_pred = np.array(x_pred_list)
 
-        self.assertTrue(abs(((x_true - x_pred)[-100:]) < 0.1).all())
+        self.assertTrue((abs((x_true - x_pred)[-100:]) < 0.1).all())
 
     def test_observe_nonlinear_state(self):
         """State observer of a nonlinear system."""
+        np.random.seed(0)
+
         def A_true(x, u):
             return np.array([0.5, 1.,
                              0., 0.48 + np.sin(u[0]+0.02)]).reshape(2, 2)
@@ -256,6 +259,7 @@ class TestUKF(unittest.TestCase):
 
     def test_observe_state_noised(self):
         """State observer of a linear system with noise."""
+        np.random.seed(0)
         m1, m2 = 1.0, 1.5
         c1, c2 = 0.2, 0.3
         k1, k2 = 15.0, 20.0
@@ -317,10 +321,12 @@ class TestUKF(unittest.TestCase):
         x_true = np.array(x_true_list)
         x_pred = np.array(x_pred_list)
 
-        self.assertTrue(abs(((x_true - x_pred)[-100:]) < 0.1).all())
+        self.assertTrue((abs((x_true - x_pred)[-100:]) < 0.1).all())
 
     def test_observe_nonlinear_state(self):
         """State observer of a nonlinear system."""
+        np.random.seed(0)
+
         def A_true(x, u):
             return np.array([0.5, 1., 0.,
                              0.48 + np.sin(u[0]+0.02)]).reshape(2, 2)
